@@ -34,7 +34,9 @@ import {
   Leaf,
   Handshake,
   X,
-  Megaphone
+  Megaphone,
+  Bell,
+  Info
 } from 'https://esm.sh/lucide-react';
 
 // --- Configuration ---
@@ -228,7 +230,7 @@ create policy "Access messages" on public.messages for all using (
 };
 
 // 2.5 Toast Component
-const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
+const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error' | 'info', onClose: () => void }) => {
   useEffect(() => {
     const timer = setTimeout(() => {
       onClose();
@@ -236,15 +238,31 @@ const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 
     return () => clearTimeout(timer);
   }, [onClose]);
 
+  const styles = {
+    success: 'bg-emerald-900 text-emerald-50 border-emerald-700/50',
+    error: 'bg-red-900 text-red-50 border-red-700/50',
+    info: 'bg-blue-900 text-blue-50 border-blue-700/50'
+  };
+
+  const icons = {
+    success: <CheckCircle className="w-5 h-5" />,
+    error: <AlertTriangle className="w-5 h-5" />,
+    info: <Info className="w-5 h-5" />
+  };
+
+  const bgStyles = {
+    success: 'bg-emerald-800',
+    error: 'bg-red-800',
+    info: 'bg-blue-800'
+  };
+
   return (
-    <div className={`fixed top-4 left-4 right-4 z-[100] flex items-center gap-3 p-4 rounded-xl shadow-2xl transition-all duration-500 animate-[slideIn_0.3s_ease-out] border ${
-      type === 'success' ? 'bg-emerald-900 text-emerald-50 border-emerald-700/50' : 'bg-red-900 text-red-50 border-red-700/50'
-    }`}>
-      <div className={`p-2 rounded-full shrink-0 ${type === 'success' ? 'bg-emerald-800' : 'bg-red-800'}`}>
-        {type === 'success' ? <CheckCircle className="w-5 h-5" /> : <AlertTriangle className="w-5 h-5" />}
+    <div className={`fixed top-4 left-4 right-4 z-[100] flex items-center gap-3 p-4 rounded-xl shadow-2xl transition-all duration-500 animate-[slideIn_0.3s_ease-out] border ${styles[type]}`}>
+      <div className={`p-2 rounded-full shrink-0 ${bgStyles[type]}`}>
+        {icons[type]}
       </div>
       <div className="flex-1">
-        <h4 className="font-bold text-sm mb-0.5">{type === 'success' ? 'Success' : 'Attention'}</h4>
+        <h4 className="font-bold text-sm mb-0.5 capitalize">{type}</h4>
         <p className="text-xs font-medium opacity-90 leading-relaxed">{message}</p>
       </div>
       <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition shrink-0">
@@ -261,7 +279,7 @@ const Auth = ({ onLogin }: { onLogin: () => void }) => {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('vendor');
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState<{message: string, type: 'success' | 'error'} | null>(null);
+  const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -442,6 +460,7 @@ const App = () => {
   const [setupNeeded, setSetupNeeded] = useState(false);
   const [wallet, setWallet] = useState<WalletData | null>(null);
   const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
+  const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
 
   // Forms
   const [newTitle, setNewTitle] = useState('');
@@ -473,6 +492,68 @@ const App = () => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Real-time Push Notifications Subscription
+  useEffect(() => {
+    if (!session) return;
+
+    // Listen for Messages
+    const msgChannel = supabase.channel('msg-notifications')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        async (payload) => {
+          const newMsg = payload.new as Message;
+          if (newMsg.sender_id === session.user.id) return; // Ignore own messages
+
+          // Verify involvement (security/relevance check)
+          const { data: tx } = await supabase.from('escrow_transactions').select('title, farmer_id, vendor_id').eq('id', newMsg.transaction_id).single();
+          
+          if (tx && (tx.farmer_id === session.user.id || tx.vendor_id === session.user.id)) {
+            setToast({ message: `New message in "${tx.title}"`, type: 'info' });
+          }
+        }
+      )
+      .subscribe();
+
+    // Listen for Transaction Updates (Status Changes)
+    const txChannel = supabase.channel('tx-notifications')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'escrow_transactions' },
+        (payload) => {
+           const newTx = payload.new as Transaction;
+           const oldTx = payload.old as Transaction;
+
+           if (newTx.status === oldTx.status) return;
+
+           const isFarmer = newTx.farmer_id === session.user.id;
+           const isVendor = newTx.vendor_id === session.user.id;
+
+           if (!isFarmer && !isVendor) return;
+
+           let msg = '';
+           if (newTx.status === 'offer_made' && isFarmer) msg = `New Offer: Vendor wants "${newTx.title}"`;
+           else if (newTx.status === 'pending_deposit' && isVendor) msg = `Offer Accepted: Please fund "${newTx.title}"`;
+           else if (newTx.status === 'in_escrow' && isFarmer) msg = `Funded: Safe to ship "${newTx.title}"`;
+           else if (newTx.status === 'shipped' && isVendor) msg = `Shipped: "${newTx.title}" is on the way!`;
+           else if (newTx.status === 'delivered') msg = `Delivered: "${newTx.title}" has arrived.`;
+           else if (newTx.status === 'completed' && isFarmer) msg = `Paid: Funds released for "${newTx.title}"`;
+           else if (newTx.status === 'disputed') msg = `Alert: Dispute raised for "${newTx.title}"`;
+
+           if (msg) {
+             setToast({ message: msg, type: newTx.status === 'disputed' ? 'error' : 'success' });
+             fetchData(); // Refresh data to show new status in UI
+           }
+        }
+      )
+      .subscribe();
+
+    return () => { 
+      supabase.removeChannel(msgChannel);
+      supabase.removeChannel(txChannel);
+    };
+  }, [session]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -529,8 +610,9 @@ const App = () => {
       setNewDesc('');
       setActiveTab('dashboard');
       fetchData();
+      setToast({ message: 'Listed successfully on the market!', type: 'success' });
     } else {
-      alert("Error creating transaction. Please try again.");
+      setToast({ message: "Error creating transaction. Please try again.", type: 'error' });
     }
   };
 
@@ -552,8 +634,9 @@ const App = () => {
     if (!error) {
       fetchData();
       setActiveTransactionId(transactionId);
+      setToast({ message: 'Offer sent to Farmer!', type: 'success' });
     } else {
-      alert("Could not make offer. It may have been taken.");
+      setToast({ message: "Could not make offer. It may have been taken.", type: 'error' });
     }
   };
 
@@ -575,8 +658,9 @@ const App = () => {
     if (!error) {
       fetchData();
       setActiveTransactionId(transactionId);
+      setToast({ message: 'Order fulfilled! Waiting for deposit.', type: 'success' });
     } else {
-      alert("Could not fulfill request. It may have been taken.");
+      setToast({ message: "Could not fulfill request. It may have been taken.", type: 'error' });
     }
   };
 
@@ -584,7 +668,10 @@ const App = () => {
     if (!session || !wallet) return;
     const amount = 5000; // Simulated
     const { error } = await supabase.from('wallets').update({ balance: wallet.balance + amount }).eq('user_id', session.user.id);
-    if (!error) fetchWallet(session.user.id);
+    if (!error) {
+       fetchWallet(session.user.id);
+       setToast({ message: 'Wallet topped up by KES 5,000', type: 'success' });
+    }
   };
 
   const activeTransaction = useMemo(() => 
@@ -646,7 +733,7 @@ const App = () => {
       // Wallet Logic for funding
       if (newStatus === 'in_escrow' && transaction.status === 'pending_deposit') {
         if (!wallet || wallet.balance < transaction.amount) {
-          alert("Insufficient funds in wallet! Please top up.");
+          setToast({ message: "Insufficient funds in wallet! Please top up.", type: 'error' });
           return;
         }
         // Deduct from Vendor
@@ -670,10 +757,18 @@ const App = () => {
         updates.vendor_email = null;
       }
 
-      await supabase.from('escrow_transactions').update(updates).eq('id', transaction.id);
-      fetchData();
-      fetchWallet(session.user.id);
-      if (newStatus === 'completed' || resetVendor) onClose();
+      const { error } = await supabase.from('escrow_transactions').update(updates).eq('id', transaction.id);
+      
+      if (!error) {
+        fetchData();
+        fetchWallet(session.user.id);
+        if (newStatus === 'completed' || resetVendor) {
+           setToast({ message: 'Transaction updated successfully', type: 'success' });
+           onClose();
+        }
+      } else {
+        setToast({ message: "Failed to update status", type: 'error' });
+      }
     };
 
     const handleQrSuccess = async (decodedText: string) => {
@@ -681,7 +776,7 @@ const App = () => {
        if (decodedText === transaction.delivery_pin) {
          updateStatus('delivered');
        } else {
-         alert("Invalid Delivery QR Code!");
+         setToast({ message: "Invalid Delivery QR Code!", type: 'error' });
        }
     };
 
@@ -689,7 +784,7 @@ const App = () => {
       if (pinInput === transaction.delivery_pin) {
         updateStatus('delivered');
       } else {
-        alert("Invalid PIN");
+        setToast({ message: "Invalid PIN code", type: 'error' });
       }
     }
 
@@ -922,6 +1017,9 @@ const App = () => {
   return (
     <div className="max-w-md mx-auto min-h-screen bg-slate-50 shadow-2xl overflow-hidden relative pb-20">
       
+      {/* Global Toast Container */}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
       {/* Header */}
       <div className="bg-white/80 backdrop-blur-md sticky top-0 z-30 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
         <div className="flex items-center gap-3">
