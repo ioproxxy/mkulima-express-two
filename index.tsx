@@ -31,7 +31,9 @@ import {
   Gavel,
   XCircle,
   Send,
-  Leaf
+  Leaf,
+  Handshake,
+  X
 } from 'https://esm.sh/lucide-react';
 
 // --- Configuration ---
@@ -194,10 +196,10 @@ create policy "Access messages" on public.messages for all using (
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 shadow-sm">
         <h2 className="text-xl font-bold text-amber-800 flex items-center gap-2 mb-4">
           <ShieldCheck className="w-6 h-6" />
-          Security Update Required
+          System Update Required
         </h2>
         <p className="text-amber-700 mb-4 text-sm leading-relaxed">
-          We have improved data privacy. Please run this SQL in your Supabase dashboard to prevent users from seeing each other's private data.
+          Please run this SQL in your Supabase dashboard to enable the Market visibility and secure transaction features.
         </p>
         <div className="relative group">
           <pre className="bg-slate-900 text-slate-50 p-4 rounded-lg text-xs overflow-auto h-64 border border-slate-700 font-mono">
@@ -529,7 +531,7 @@ const App = () => {
     }
   };
 
-  const handleClaimListing = async (transactionId: string) => {
+  const handleMakeOffer = async (transactionId: string) => {
     if (!session || userRole !== 'vendor') return;
 
     const { error } = await supabase
@@ -537,7 +539,7 @@ const App = () => {
       .update({ 
         vendor_id: session.user.id, 
         vendor_email: session.user.email,
-        status: 'pending_deposit' // Move to pending deposit stage
+        status: 'offer_made' // Move to offer_made stage
       })
       .eq('id', transactionId)
       // Safety check: ensure it is still listed and unclaimed
@@ -548,7 +550,7 @@ const App = () => {
       fetchData();
       setActiveTransactionId(transactionId);
     } else {
-      alert("Could not claim listing. It may have been taken.");
+      alert("Could not make offer. It may have been taken.");
     }
   };
 
@@ -614,7 +616,7 @@ const App = () => {
       setMsgText('');
     };
 
-    const updateStatus = async (newStatus: TransactionStatus) => {
+    const updateStatus = async (newStatus: TransactionStatus, resetVendor = false) => {
       // Wallet Logic for funding
       if (newStatus === 'in_escrow' && transaction.status === 'pending_deposit') {
         if (!wallet || wallet.balance < transaction.amount) {
@@ -637,10 +639,16 @@ const App = () => {
          }
       }
 
-      await supabase.from('escrow_transactions').update({ status: newStatus }).eq('id', transaction.id);
+      const updates: any = { status: newStatus };
+      if (resetVendor) {
+        updates.vendor_id = null;
+        updates.vendor_email = null;
+      }
+
+      await supabase.from('escrow_transactions').update(updates).eq('id', transaction.id);
       fetchData();
       fetchWallet(session.user.id);
-      if (newStatus === 'completed') onClose();
+      if (newStatus === 'completed' || resetVendor) onClose();
     };
 
     const handleQrSuccess = async (decodedText: string) => {
@@ -717,7 +725,8 @@ const App = () => {
                       <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-slate-100"></div>
                       {[
                         { s: 'listed', l: 'Listed on Market', done: true },
-                        { s: 'pending_deposit', l: 'Agreement Reached', done: transaction.status !== 'listed' && transaction.status !== 'offer_made' },
+                        { s: 'offer_made', l: 'Offer Received', done: transaction.status !== 'listed' },
+                        { s: 'pending_deposit', l: 'Offer Accepted', done: ['pending_deposit', 'in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
                         { s: 'in_escrow', l: 'Funds Secured', done: ['in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
                         { s: 'shipped', l: 'Goods Shipped', done: ['shipped', 'delivered', 'completed'].includes(transaction.status) },
                         { s: 'delivered', l: 'Delivered', done: ['delivered', 'completed'].includes(transaction.status) },
@@ -736,6 +745,29 @@ const App = () => {
                 {/* Actions - Strictly Controlled by Identity */}
                 {canSeeControls && (
                   <div className="pb-8">
+                     {/* Farmer: Accept or Reject Offer */}
+                     {isOwnerFarmer && transaction.status === 'offer_made' && (
+                       <div className="space-y-3">
+                         <div className="bg-purple-50 p-4 rounded-xl border border-purple-200 mb-2">
+                           <p className="text-sm text-purple-800 font-medium text-center">
+                             A Vendor wants to buy this for <span className="font-bold">KES {transaction.amount.toLocaleString()}</span>.
+                           </p>
+                         </div>
+                         <button onClick={() => updateStatus('pending_deposit')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
+                           <Handshake className="w-5 h-5" /> Accept Offer
+                         </button>
+                         <button onClick={() => updateStatus('listed', true)} className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-xl font-bold hover:bg-slate-50 active:scale-95 transition flex items-center justify-center gap-2">
+                           <X className="w-5 h-5" /> Reject Offer
+                         </button>
+                       </div>
+                     )}
+
+                     {isOwnerVendor && transaction.status === 'offer_made' && (
+                       <div className="bg-amber-50 p-4 rounded-xl text-amber-800 text-sm font-medium text-center border border-amber-200">
+                         Waiting for Farmer to accept your offer.
+                       </div>
+                     )}
+
                      {isOwnerVendor && transaction.status === 'pending_deposit' && (
                        <button onClick={() => updateStatus('in_escrow')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
                          <Lock className="w-5 h-5" /> Deposit Funds (Escrow)
@@ -751,7 +783,7 @@ const App = () => {
                          <CheckCircle className="w-5 h-5" /> Release Payment
                        </button>
                      )}
-                     {transaction.status !== 'completed' && transaction.status !== 'disputed' && (
+                     {transaction.status !== 'completed' && transaction.status !== 'disputed' && transaction.status !== 'listed' && (
                        <button onClick={() => updateStatus('disputed')} className="mt-4 w-full bg-white text-red-600 border border-red-100 py-3 rounded-xl font-semibold hover:bg-red-50 transition flex items-center justify-center gap-2">
                          <Gavel className="w-4 h-4" /> Raise Dispute
                        </button>
@@ -984,11 +1016,11 @@ const App = () => {
                        <button 
                          onClick={(e) => {
                            e.stopPropagation();
-                           handleClaimListing(t.id);
+                           handleMakeOffer(t.id);
                          }}
                          className="w-full mt-3 bg-slate-900 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-600 transition"
                        >
-                         Purchase
+                         Make Offer
                        </button>
                      )}
                      
