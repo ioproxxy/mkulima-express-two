@@ -33,7 +33,8 @@ import {
   Send,
   Leaf,
   Handshake,
-  X
+  X,
+  Megaphone
 } from 'https://esm.sh/lucide-react';
 
 // --- Configuration ---
@@ -168,12 +169,14 @@ with check (
   (vendor_id = auth.uid()) or (farmer_id = auth.uid())
 );
 
--- Update: You are involved OR you are claiming a listing (becoming vendor)
+-- Update: You are involved OR you are claiming a listing 
+-- (Vendor claiming Farmer Listing OR Farmer claiming Vendor Request)
 create policy "Update transactions" on public.escrow_transactions for update
 using (
   vendor_id = auth.uid() or 
   farmer_id = auth.uid() or 
-  (status = 'listed' and vendor_id is null)
+  (status = 'listed' and vendor_id is null) or
+  (status = 'listed' and farmer_id is null)
 );
 
 -- Messages: Must be involved in the transaction
@@ -513,11 +516,11 @@ const App = () => {
       title: newTitle,
       amount: parseFloat(newAmount),
       description: newDesc,
-      vendor_id: isVendor ? session.user.id : null, // If farmer lists, vendor is null initially
+      vendor_id: isVendor ? session.user.id : null,
       farmer_id: isVendor ? null : session.user.id,
       vendor_email: isVendor ? session.user.email : null,
       farmer_email: isVendor ? null : session.user.email,
-      status: isVendor ? 'pending_deposit' : 'listed', // Listings start as 'listed'
+      status: 'listed', // Both default to 'listed' so they are visible in market
     });
 
     if (!error) {
@@ -551,6 +554,29 @@ const App = () => {
       setActiveTransactionId(transactionId);
     } else {
       alert("Could not make offer. It may have been taken.");
+    }
+  };
+
+  const handleFulfillRequest = async (transactionId: string) => {
+    if (!session || userRole !== 'farmer') return;
+
+    const { error } = await supabase
+      .from('escrow_transactions')
+      .update({ 
+        farmer_id: session.user.id, 
+        farmer_email: session.user.email,
+        status: 'pending_deposit' // Immediately contract formed, waiting for funding
+      })
+      .eq('id', transactionId)
+      // Safety check: ensure it is still listed and unclaimed by a farmer
+      .eq('status', 'listed')
+      .is('farmer_id', null);
+
+    if (!error) {
+      fetchData();
+      setActiveTransactionId(transactionId);
+    } else {
+      alert("Could not fulfill request. It may have been taken.");
     }
   };
 
@@ -631,7 +657,6 @@ const App = () => {
       if (newStatus === 'completed' && transaction.status === 'delivered') {
          // Add to Farmer
          if (transaction.farmer_id) {
-            // We fetch the current farmer wallet first for safety in a real app, here we assume existence or handle error
             const { data: farmerWallet } = await supabase.from('wallets').select('balance').eq('user_id', transaction.farmer_id).single();
             if (farmerWallet) {
               await supabase.from('wallets').update({ balance: farmerWallet.balance + transaction.amount }).eq('user_id', transaction.farmer_id);
@@ -726,7 +751,7 @@ const App = () => {
                       {[
                         { s: 'listed', l: 'Listed on Market', done: true },
                         { s: 'offer_made', l: 'Offer Received', done: transaction.status !== 'listed' },
-                        { s: 'pending_deposit', l: 'Offer Accepted', done: ['pending_deposit', 'in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
+                        { s: 'pending_deposit', l: 'Contract Formed', done: ['pending_deposit', 'in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
                         { s: 'in_escrow', l: 'Funds Secured', done: ['in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
                         { s: 'shipped', l: 'Goods Shipped', done: ['shipped', 'delivered', 'completed'].includes(transaction.status) },
                         { s: 'delivered', l: 'Delivered', done: ['delivered', 'completed'].includes(transaction.status) },
@@ -773,6 +798,14 @@ const App = () => {
                          <Lock className="w-5 h-5" /> Deposit Funds (Escrow)
                        </button>
                      )}
+                     
+                     {/* Farmer Waiting for Deposit */}
+                     {isOwnerFarmer && transaction.status === 'pending_deposit' && (
+                        <div className="bg-blue-50 p-4 rounded-xl text-blue-800 text-sm font-medium text-center border border-blue-200">
+                           Waiting for Vendor to deposit funds.
+                        </div>
+                     )}
+
                      {isOwnerFarmer && transaction.status === 'in_escrow' && (
                        <button onClick={() => updateStatus('shipped')} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition flex items-center justify-center gap-2">
                          <Truck className="w-5 h-5" /> Mark as Shipped
@@ -999,54 +1032,88 @@ const App = () => {
              <div className="grid grid-cols-2 gap-3">
                 {/* 
                   Marketplace Logic:
-                  1. Vendors see all listings.
-                  2. Farmers see all listings (to gauge market), but can only edit their own.
-                  RLS ensures 'listed' items are visible.
+                  Shows both Farmer Listings (Selling) and Vendor Requests (Buying).
                 */}
-                {transactions.filter(t => t.status === 'listed').map(t => (
-                  <div key={t.id} onClick={() => setActiveTransactionId(t.id)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-emerald-500 transition cursor-pointer group">
-                     <div className="h-24 bg-slate-100 rounded-lg mb-3 flex items-center justify-center group-hover:bg-emerald-50 transition">
-                        <ShoppingBag className="w-8 h-8 text-slate-300 group-hover:text-emerald-400" />
-                     </div>
-                     <h4 className="font-bold text-slate-800 text-sm truncate">{t.title}</h4>
-                     <p className="text-emerald-700 font-mono font-bold text-sm mt-1">KES {t.amount}</p>
-                     
-                     {/* Vendor 'Buy' Action */}
-                     {userRole === 'vendor' && (
-                       <button 
-                         onClick={(e) => {
-                           e.stopPropagation();
-                           handleMakeOffer(t.id);
-                         }}
-                         className="w-full mt-3 bg-slate-900 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-600 transition"
-                       >
-                         Make Offer
-                       </button>
-                     )}
-                     
-                     {/* Farmer 'Own' Indicator */}
-                     {userRole === 'farmer' && t.farmer_id === session.user.id && (
-                        <div className="w-full mt-3 text-center text-[10px] text-emerald-600 font-bold bg-emerald-50 py-1 rounded">
-                           Your Listing
-                        </div>
-                     )}
-                  </div>
-                ))}
+                {transactions.filter(t => t.status === 'listed').map(t => {
+                  const isVendorRequest = !t.farmer_id && t.vendor_id; // Created by Vendor, needs Farmer
+                  const isFarmerListing = !t.vendor_id && t.farmer_id; // Created by Farmer, needs Vendor
+
+                  return (
+                    <div key={t.id} onClick={() => setActiveTransactionId(t.id)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-emerald-500 transition cursor-pointer group flex flex-col h-full">
+                       <div className={`h-24 rounded-lg mb-3 flex items-center justify-center transition relative overflow-hidden ${isVendorRequest ? 'bg-amber-50 group-hover:bg-amber-100' : 'bg-emerald-50 group-hover:bg-emerald-100'}`}>
+                          {isVendorRequest ? (
+                             <Megaphone className="w-8 h-8 text-amber-400 group-hover:text-amber-500" />
+                          ) : (
+                             <ShoppingBag className="w-8 h-8 text-emerald-400 group-hover:text-emerald-500" />
+                          )}
+                          <div className={`absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded ${isVendorRequest ? 'bg-amber-200 text-amber-800' : 'bg-emerald-200 text-emerald-800'}`}>
+                            {isVendorRequest ? 'WANTED' : 'FOR SALE'}
+                          </div>
+                       </div>
+                       <h4 className="font-bold text-slate-800 text-sm truncate">{t.title}</h4>
+                       <p className="text-emerald-700 font-mono font-bold text-sm mt-1">KES {t.amount}</p>
+                       
+                       <div className="mt-auto pt-3">
+                        {/* Vendor View */}
+                        {userRole === 'vendor' && isFarmerListing && (
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleMakeOffer(t.id);
+                            }}
+                            className="w-full bg-slate-900 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-600 transition"
+                          >
+                            Make Offer
+                          </button>
+                        )}
+                        {userRole === 'vendor' && isVendorRequest && t.vendor_id === session.user.id && (
+                          <div className="w-full text-center text-[10px] text-amber-700 font-bold bg-amber-50 py-1 rounded">
+                             Your Request
+                          </div>
+                        )}
+
+                        {/* Farmer View */}
+                        {userRole === 'farmer' && isVendorRequest && (
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleFulfillRequest(t.id);
+                            }}
+                            className="w-full bg-emerald-600 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-700 transition shadow-lg shadow-emerald-200"
+                          >
+                            Fulfill Order
+                          </button>
+                        )}
+                        {userRole === 'farmer' && isFarmerListing && t.farmer_id === session.user.id && (
+                           <div className="w-full text-center text-[10px] text-emerald-600 font-bold bg-emerald-50 py-1 rounded">
+                              Your Listing
+                           </div>
+                        )}
+                       </div>
+                    </div>
+                  );
+                })}
                 
                 {transactions.filter(t => t.status === 'listed').length === 0 && (
-                   <div className="col-span-2 text-center py-10 text-slate-400 text-sm">
-                      No listed produce available right now.
+                   <div className="col-span-2 text-center py-10 text-slate-400 text-sm flex flex-col items-center gap-3">
+                      <p>No listings available right now.</p>
+                      <button 
+                        onClick={() => setSetupNeeded(true)}
+                        className="text-xs text-emerald-600 underline"
+                      >
+                        Don't see items? Check Database Rules
+                      </button>
                    </div>
                 )}
              </div>
           </div>
         )}
 
-        {/* Create / Wallet View Placeholders for completeness */}
+        {/* Create / Wallet View */}
         {activeTab === 'create' && (
           <div className="animate-in slide-in-from-bottom-5 duration-300">
              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                <h2 className="text-xl font-bold text-slate-800 mb-6">{userRole === 'farmer' ? 'List Produce' : 'Create Request'}</h2>
+                <h2 className="text-xl font-bold text-slate-800 mb-6">{userRole === 'farmer' ? 'List Produce (Sell)' : 'Create Request (Buy)'}</h2>
                 <form onSubmit={createTransaction} className="space-y-5">
                    <div>
                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Title / Item Name</label>
@@ -1061,8 +1128,11 @@ const App = () => {
                      <textarea className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none" placeholder="Delivery details, quality specifications..." value={newDesc} onChange={e => setNewDesc(e.target.value)} />
                    </div>
                    <button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition">
-                     {userRole === 'farmer' ? 'Post Listing' : 'Create Request'}
+                     {userRole === 'farmer' ? 'Post Listing to Market' : 'Post Request to Market'}
                    </button>
+                   <p className="text-xs text-slate-400 text-center">
+                     This will appear in the Marketplace for {userRole === 'farmer' ? 'Vendors' : 'Farmers'} to see.
+                   </p>
                 </form>
              </div>
           </div>
@@ -1107,7 +1177,7 @@ const App = () => {
           <Wallet className="w-6 h-6" />
           <span className="text-[10px] font-bold">Wallet</span>
         </button>
-        <button className="p-3 rounded-2xl text-slate-400 hover:bg-slate-50 flex flex-col items-center gap-1">
+        <button onClick={() => setSetupNeeded(true)} className="p-3 rounded-2xl text-slate-400 hover:bg-slate-50 flex flex-col items-center gap-1">
           <User className="w-6 h-6" />
           <span className="text-[10px] font-bold">Profile</span>
         </button>
