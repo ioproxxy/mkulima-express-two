@@ -125,9 +125,8 @@ create table if not exists public.messages (
   sender_email text
 );
 
--- 4. MIGRATION: Ensure vendor_id is nullable
+-- 4. MIGRATION & COLUMNS
 alter table public.escrow_transactions alter column vendor_id drop not null;
--- Ensure delivery_pin exists if table was already created
 do $$ 
 begin 
   if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='delivery_pin') then
@@ -135,20 +134,47 @@ begin
   end if;
 end $$;
 
--- 5. Enable RLS
+-- 5. ENABLE SECURITY (RLS)
 alter table public.wallets enable row level security;
 alter table public.escrow_transactions enable row level security;
 alter table public.messages enable row level security;
 
--- 6. Policies (Re-runnable)
+-- 6. STRICT POLICIES (Data Isolation)
+-- Reset existing policies to avoid conflicts
 drop policy if exists "Access own wallet" on public.wallets;
 drop policy if exists "Access transactions" on public.escrow_transactions;
+drop policy if exists "View transactions" on public.escrow_transactions;
+drop policy if exists "Insert transactions" on public.escrow_transactions;
+drop policy if exists "Update transactions" on public.escrow_transactions;
 drop policy if exists "Access messages" on public.messages;
 
+-- Wallet: Only owner can see
 create policy "Access own wallet" on public.wallets for all using (auth.uid() = user_id);
 
-create policy "Access transactions" on public.escrow_transactions for all using (auth.role() = 'authenticated');
+-- Transactions: 
+-- View: You are involved OR it is a public listing
+create policy "View transactions" on public.escrow_transactions for select
+using (
+  vendor_id = auth.uid() or 
+  farmer_id = auth.uid() or 
+  status = 'listed'
+);
 
+-- Insert: You must be the recorded creator
+create policy "Insert transactions" on public.escrow_transactions for insert
+with check (
+  (vendor_id = auth.uid()) or (farmer_id = auth.uid())
+);
+
+-- Update: You are involved OR you are claiming a listing (becoming vendor)
+create policy "Update transactions" on public.escrow_transactions for update
+using (
+  vendor_id = auth.uid() or 
+  farmer_id = auth.uid() or 
+  (status = 'listed' and vendor_id is null)
+);
+
+-- Messages: Must be involved in the transaction
 create policy "Access messages" on public.messages for all using (
   exists (
     select 1 from public.escrow_transactions t 
@@ -167,11 +193,11 @@ create policy "Access messages" on public.messages for all using (
     <div className="p-6 max-w-2xl mx-auto mt-10">
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 shadow-sm">
         <h2 className="text-xl font-bold text-amber-800 flex items-center gap-2 mb-4">
-          <AlertTriangle className="w-6 h-6" />
-          System Update Required
+          <ShieldCheck className="w-6 h-6" />
+          Security Update Required
         </h2>
         <p className="text-amber-700 mb-4 text-sm leading-relaxed">
-          To enable <strong>Chat, Logistics, and Dispute Resolution</strong>, please run this SQL in your Supabase dashboard.
+          We have improved data privacy. Please run this SQL in your Supabase dashboard to prevent users from seeing each other's private data.
         </p>
         <div className="relative group">
           <pre className="bg-slate-900 text-slate-50 p-4 rounded-lg text-xs overflow-auto h-64 border border-slate-700 font-mono">
@@ -445,6 +471,7 @@ const App = () => {
 
   const fetchData = async () => {
     setLoading(true);
+    // RLS filters this automatically on the backend now
     const { data, error } = await supabase
       .from('escrow_transactions')
       .select('*')
@@ -497,6 +524,31 @@ const App = () => {
       setNewDesc('');
       setActiveTab('dashboard');
       fetchData();
+    } else {
+      alert("Error creating transaction. Please try again.");
+    }
+  };
+
+  const handleClaimListing = async (transactionId: string) => {
+    if (!session || userRole !== 'vendor') return;
+
+    const { error } = await supabase
+      .from('escrow_transactions')
+      .update({ 
+        vendor_id: session.user.id, 
+        vendor_email: session.user.email,
+        status: 'pending_deposit' // Move to pending deposit stage
+      })
+      .eq('id', transactionId)
+      // Safety check: ensure it is still listed and unclaimed
+      .eq('status', 'listed')
+      .is('vendor_id', null);
+
+    if (!error) {
+      fetchData();
+      setActiveTransactionId(transactionId);
+    } else {
+      alert("Could not claim listing. It may have been taken.");
     }
   };
 
@@ -575,10 +627,9 @@ const App = () => {
 
       // Wallet Logic for Release
       if (newStatus === 'completed' && transaction.status === 'delivered') {
-         // Add to Farmer (Need to fetch farmer's current wallet first or just increment)
-         // For simplicity in this demo, we assume we can just increment purely via SQL or we'd need an Edge Function for safety.
-         // Here we'll do a simple client side two-step which is insecure for prod but fine for demo.
+         // Add to Farmer
          if (transaction.farmer_id) {
+            // We fetch the current farmer wallet first for safety in a real app, here we assume existence or handle error
             const { data: farmerWallet } = await supabase.from('wallets').select('balance').eq('user_id', transaction.farmer_id).single();
             if (farmerWallet) {
               await supabase.from('wallets').update({ balance: farmerWallet.balance + transaction.amount }).eq('user_id', transaction.farmer_id);
@@ -609,8 +660,12 @@ const App = () => {
       }
     }
 
-    const isFarmer = userRole === 'farmer';
-    const isVendor = userRole === 'vendor';
+    // Strict Identity Checks for UI Controls
+    const isOwnerFarmer = session.user.id === transaction.farmer_id;
+    const isOwnerVendor = session.user.id === transaction.vendor_id;
+    
+    // Fallback for role-based view (e.g. seeing a listing)
+    const canSeeControls = isOwnerFarmer || isOwnerVendor;
 
     return (
       <div className="fixed inset-0 bg-slate-50 z-50 flex flex-col animate-in slide-in-from-bottom-10 duration-200">
@@ -644,6 +699,12 @@ const App = () => {
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Description</span>
                     <p className="text-slate-700 leading-relaxed">{transaction.description || 'No description provided.'}</p>
                   </div>
+                  {/* Identity Badge */}
+                  <div className="mt-4 flex gap-2">
+                     {isOwnerFarmer && <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full font-bold">You are the Farmer</span>}
+                     {isOwnerVendor && <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-1 rounded-full font-bold">You are the Vendor</span>}
+                     {!isOwnerFarmer && !isOwnerVendor && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-full font-bold">Read Only View</span>}
+                  </div>
                 </div>
 
                 {/* Timeline */}
@@ -672,29 +733,31 @@ const App = () => {
                    </div>
                 </div>
 
-                {/* Actions */}
-                <div className="pb-8">
-                   {isVendor && transaction.status === 'pending_deposit' && (
-                     <button onClick={() => updateStatus('in_escrow')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
-                       <Lock className="w-5 h-5" /> Deposit Funds (Escrow)
-                     </button>
-                   )}
-                   {isFarmer && transaction.status === 'in_escrow' && (
-                     <button onClick={() => updateStatus('shipped')} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition flex items-center justify-center gap-2">
-                       <Truck className="w-5 h-5" /> Mark as Shipped
-                     </button>
-                   )}
-                   {isVendor && transaction.status === 'delivered' && (
-                     <button onClick={() => updateStatus('completed')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
-                       <CheckCircle className="w-5 h-5" /> Release Payment
-                     </button>
-                   )}
-                   {transaction.status !== 'completed' && transaction.status !== 'disputed' && (
-                     <button onClick={() => updateStatus('disputed')} className="mt-4 w-full bg-white text-red-600 border border-red-100 py-3 rounded-xl font-semibold hover:bg-red-50 transition flex items-center justify-center gap-2">
-                       <Gavel className="w-4 h-4" /> Raise Dispute
-                     </button>
-                   )}
-                </div>
+                {/* Actions - Strictly Controlled by Identity */}
+                {canSeeControls && (
+                  <div className="pb-8">
+                     {isOwnerVendor && transaction.status === 'pending_deposit' && (
+                       <button onClick={() => updateStatus('in_escrow')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
+                         <Lock className="w-5 h-5" /> Deposit Funds (Escrow)
+                       </button>
+                     )}
+                     {isOwnerFarmer && transaction.status === 'in_escrow' && (
+                       <button onClick={() => updateStatus('shipped')} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition flex items-center justify-center gap-2">
+                         <Truck className="w-5 h-5" /> Mark as Shipped
+                       </button>
+                     )}
+                     {isOwnerVendor && transaction.status === 'delivered' && (
+                       <button onClick={() => updateStatus('completed')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
+                         <CheckCircle className="w-5 h-5" /> Release Payment
+                       </button>
+                     )}
+                     {transaction.status !== 'completed' && transaction.status !== 'disputed' && (
+                       <button onClick={() => updateStatus('disputed')} className="mt-4 w-full bg-white text-red-600 border border-red-100 py-3 rounded-xl font-semibold hover:bg-red-50 transition flex items-center justify-center gap-2">
+                         <Gavel className="w-4 h-4" /> Raise Dispute
+                       </button>
+                     )}
+                  </div>
+                )}
              </div>
            )}
 
@@ -733,7 +796,7 @@ const App = () => {
                   <h3 className="font-bold text-slate-800 mb-2">Delivery Verification</h3>
                   <p className="text-slate-500 text-sm mb-6">Use this QR code to securely verify delivery.</p>
                   
-                  {isFarmer ? (
+                  {isOwnerFarmer ? (
                      transaction.status === 'shipped' || transaction.status === 'delivered' ? (
                        <div className="flex flex-col items-center">
                          <div className="bg-white p-4 rounded-xl border-2 border-slate-900 mb-4">
@@ -748,7 +811,7 @@ const App = () => {
                          <p className="text-sm text-slate-400">QR Code generates when marked as shipped.</p>
                        </div>
                      )
-                  ) : (
+                  ) : isOwnerVendor ? (
                      // Vendor View
                      <div className="flex flex-col items-center">
                         {qrScannerOpen ? (
@@ -778,6 +841,10 @@ const App = () => {
                            </div>
                         </div>
                      </div>
+                  ) : (
+                    <div className="text-slate-400 italic text-sm">
+                      Only the involved parties can access logistics.
+                    </div>
                   )}
                </div>
              </div>
@@ -838,7 +905,8 @@ const App = () => {
                  <span className="text-xs text-emerald-600 font-semibold cursor-pointer">View All</span>
                </div>
                
-               {transactions.length === 0 ? (
+               {/* Dashboard Filter: Only show items relevant to the current user */}
+               {transactions.filter(t => t.farmer_id === session.user.id || t.vendor_id === session.user.id).length === 0 ? (
                  <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-300">
                    <Leaf className="w-10 h-10 text-slate-300 mx-auto mb-2" />
                    <p className="text-slate-500 text-sm">No transactions yet.</p>
@@ -846,7 +914,9 @@ const App = () => {
                  </div>
                ) : (
                  <div className="space-y-3">
-                   {transactions.map(t => (
+                   {transactions
+                    .filter(t => t.farmer_id === session.user.id || t.vendor_id === session.user.id)
+                    .map(t => (
                      <div key={t.id} onClick={() => setActiveTransactionId(t.id)} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center gap-4 hover:shadow-md transition cursor-pointer active:scale-[0.99]">
                        <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${t.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
                          {t.status === 'completed' ? <CheckCircle className="w-6 h-6" /> : <CreditCard className="w-6 h-6" />}
@@ -895,6 +965,12 @@ const App = () => {
              </div>
 
              <div className="grid grid-cols-2 gap-3">
+                {/* 
+                  Marketplace Logic:
+                  1. Vendors see all listings.
+                  2. Farmers see all listings (to gauge market), but can only edit their own.
+                  RLS ensures 'listed' items are visible.
+                */}
                 {transactions.filter(t => t.status === 'listed').map(t => (
                   <div key={t.id} onClick={() => setActiveTransactionId(t.id)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-emerald-500 transition cursor-pointer group">
                      <div className="h-24 bg-slate-100 rounded-lg mb-3 flex items-center justify-center group-hover:bg-emerald-50 transition">
@@ -902,14 +978,29 @@ const App = () => {
                      </div>
                      <h4 className="font-bold text-slate-800 text-sm truncate">{t.title}</h4>
                      <p className="text-emerald-700 font-mono font-bold text-sm mt-1">KES {t.amount}</p>
+                     
+                     {/* Vendor 'Buy' Action */}
                      {userRole === 'vendor' && (
-                       <button className="w-full mt-3 bg-slate-900 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-600 transition">
-                         Make Offer
+                       <button 
+                         onClick={(e) => {
+                           e.stopPropagation();
+                           handleClaimListing(t.id);
+                         }}
+                         className="w-full mt-3 bg-slate-900 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-600 transition"
+                       >
+                         Purchase
                        </button>
+                     )}
+                     
+                     {/* Farmer 'Own' Indicator */}
+                     {userRole === 'farmer' && t.farmer_id === session.user.id && (
+                        <div className="w-full mt-3 text-center text-[10px] text-emerald-600 font-bold bg-emerald-50 py-1 rounded">
+                           Your Listing
+                        </div>
                      )}
                   </div>
                 ))}
-                {/* Placeholders if empty */}
+                
                 {transactions.filter(t => t.status === 'listed').length === 0 && (
                    <div className="col-span-2 text-center py-10 text-slate-400 text-sm">
                       No listed produce available right now.
