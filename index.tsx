@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient } from '@supabase/supabase-js';
@@ -474,7 +473,8 @@ const TransactionDetails = ({
                   {steps.map((step, idx) => (
                     <TimelineStep 
                       key={idx} 
-                      {...step} 
+                      title={step.title}
+                      date={step.date}
                       isLast={idx === steps.length - 1} 
                       status={step.status as any} 
                     />
@@ -738,6 +738,7 @@ const App = () => {
   const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
   const [role, setRole] = useState("vendor");
   const [showSetup, setShowSetup] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   
   // Create Form State
   const [createForm, setCreateForm] = useState({
@@ -1094,6 +1095,19 @@ const App = () => {
         {/* Market View */}
         {activeTab === 'market' && (
           <div className="space-y-8 animate-in fade-in duration-500">
+            {/* Search Bar */}
+            <div className="relative sticky top-0 z-10 pt-2 -mt-2 bg-slate-50/50 backdrop-blur-sm pb-2">
+               <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                  <input
+                    className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium text-slate-700 placeholder:text-slate-400"
+                    placeholder="Search produce..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                  />
+               </div>
+            </div>
+
             {/* Market Trends Section */}
             <div>
               <div className="flex items-center gap-2 mb-4">
@@ -1140,12 +1154,24 @@ const App = () => {
               </div>
 
               <div className="grid grid-cols-1 gap-4">
-                {transactions.filter(t => t.status === 'listed').length === 0 ? (
-                  <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200">
-                    <p className="text-slate-500 text-sm font-medium">No listings available right now.</p>
-                  </div>
-                ) : (
-                  transactions.filter(t => t.status === 'listed').map(t => (
+                {(() => {
+                  const filteredListings = transactions.filter(t => 
+                    t.status === 'listed' && (
+                      t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      (t.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                      (t.category || '').toLowerCase().includes(searchQuery.toLowerCase())
+                    )
+                  );
+
+                  if (filteredListings.length === 0) {
+                    return (
+                      <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200">
+                        <p className="text-slate-500 text-sm font-medium">No listings available matching "{searchQuery}".</p>
+                      </div>
+                    );
+                  }
+
+                  return filteredListings.map(t => (
                     <div key={t.id} onClick={() => handleClaim(t.id)} className="bg-white p-0 rounded-2xl border border-slate-100 shadow-sm hover:border-emerald-500 transition-all group overflow-hidden cursor-pointer relative">
                       <div className="p-5 flex justify-between items-start">
                         <div className="flex-1 min-w-0 pr-4">
@@ -1192,8 +1218,8 @@ const App = () => {
                         </span>
                       </div>
                     </div>
-                  ))
-                )}
+                  ));
+                })()}
               </div>
             </div>
           </div>
