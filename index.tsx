@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -36,7 +37,9 @@ import {
   X,
   Megaphone,
   Bell,
-  Info
+  Info,
+  Scale,
+  TrendingDown
 } from 'https://esm.sh/lucide-react';
 
 // --- Configuration ---
@@ -61,6 +64,8 @@ interface Transaction {
   vendor_email?: string;
   farmer_email?: string;
   delivery_pin?: string; // Secret pin for delivery verification
+  category?: string;
+  quantity?: number;
 }
 
 interface WalletData {
@@ -76,6 +81,8 @@ interface Message {
   created_at: string;
   sender_email?: string;
 }
+
+const CATEGORIES = ['Maize', 'Beans', 'Potatoes', 'Tomatoes', 'Onions', 'Cabbage', 'Rice', 'Wheat', 'Carrots', 'Avocado', 'Mangoes', 'Other'];
 
 // --- Components ---
 
@@ -117,7 +124,9 @@ create table if not exists public.escrow_transactions (
   farmer_id uuid references auth.users(id),
   vendor_email text,
   farmer_email text,
-  delivery_pin text default substring(md5(random()::text) from 0 for 7) -- 6 char PIN
+  delivery_pin text default substring(md5(random()::text) from 0 for 7), -- 6 char PIN
+  category text default 'Other',
+  quantity numeric default 0
 );
 
 -- 3. Create Messages Table
@@ -130,12 +139,18 @@ create table if not exists public.messages (
   sender_email text
 );
 
--- 4. MIGRATION & COLUMNS
+-- 4. MIGRATION & COLUMNS (Safe to run multiple times)
 alter table public.escrow_transactions alter column vendor_id drop not null;
 do $$ 
 begin 
   if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='delivery_pin') then
     alter table public.escrow_transactions add column delivery_pin text default substring(md5(random()::text) from 0 for 7);
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='category') then
+    alter table public.escrow_transactions add column category text default 'Other';
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='quantity') then
+    alter table public.escrow_transactions add column quantity numeric default 0;
   end if;
 end $$;
 
@@ -204,7 +219,7 @@ create policy "Access messages" on public.messages for all using (
           System Update Required
         </h2>
         <p className="text-amber-700 mb-4 text-sm leading-relaxed">
-          Please run this SQL in your Supabase dashboard to enable the Market visibility and secure transaction features.
+          Please run this SQL in your Supabase dashboard to enable the Market visibility, secure transaction features, and Trend Analysis.
         </p>
         <div className="relative group">
           <pre className="bg-slate-900 text-slate-50 p-4 rounded-lg text-xs overflow-auto h-64 border border-slate-700 font-mono">
@@ -466,6 +481,61 @@ const App = () => {
   const [newTitle, setNewTitle] = useState('');
   const [newAmount, setNewAmount] = useState('');
   const [newDesc, setNewDesc] = useState('');
+  const [newCategory, setNewCategory] = useState('Maize');
+  const [newQuantity, setNewQuantity] = useState('');
+
+  // Trends calculation (REAL LOGIC)
+  const marketTrends = useMemo(() => {
+    // 1. Group transactions by category
+    const byCategory: Record<string, Transaction[]> = {};
+    
+    transactions.forEach(t => {
+      // Filter valid transactions for price calculation
+      if (t.status === 'disputed' || !t.category || !t.quantity || t.quantity <= 0) return;
+      
+      const cat = t.category;
+      if (!byCategory[cat]) byCategory[cat] = [];
+      byCategory[cat].push(t);
+    });
+
+    // 2. Calculate trends for each category
+    return Object.entries(byCategory).map(([name, txs]) => {
+      // Sort desc (newest first) to separate recent vs old
+      txs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      
+      // Split roughly in half to compare "Now" vs "Before"
+      // If only 1 item, it is both new and old (stable)
+      const half = Math.ceil(txs.length / 2);
+      const recent = txs.slice(0, half);
+      const old = txs.slice(half);
+      
+      const getAvg = (list: Transaction[]) => {
+        if (!list.length) return 0;
+        const totalAmt = list.reduce((sum, t) => sum + t.amount, 0);
+        const totalQty = list.reduce((sum, t) => sum + (t.quantity || 0), 0);
+        return totalQty > 0 ? totalAmt / totalQty : 0;
+      };
+
+      const recentPrice = getAvg(recent);
+      const oldPrice = getAvg(old);
+      
+      // Calculate overall Weighted Average Price for display
+      const totalAvg = getAvg(txs);
+
+      // Trend is UP if recent price is higher than old price
+      // If we have no old data, we consider it stable (trendUp = true/neutral)
+      const trendUp = oldPrice === 0 ? true : recentPrice >= oldPrice;
+      
+      return {
+        name,
+        price: Math.round(totalAvg),
+        up: trendUp,
+        count: txs.length
+      };
+    })
+    .filter(g => g.price > 0) // Hide zero price items
+    .sort((a, b) => b.price - a.price); // Sort by highest value items
+  }, [transactions]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -597,6 +667,8 @@ const App = () => {
       title: newTitle,
       amount: parseFloat(newAmount),
       description: newDesc,
+      category: newCategory,
+      quantity: parseFloat(newQuantity),
       vendor_id: isVendor ? session.user.id : null,
       farmer_id: isVendor ? null : session.user.id,
       vendor_email: isVendor ? session.user.email : null,
@@ -608,11 +680,19 @@ const App = () => {
       setNewTitle('');
       setNewAmount('');
       setNewDesc('');
+      setNewQuantity('');
+      setNewCategory('Maize');
       setActiveTab('dashboard');
       fetchData();
       setToast({ message: 'Listed successfully on the market!', type: 'success' });
     } else {
-      setToast({ message: "Error creating transaction. Please try again.", type: 'error' });
+      // Check for column error, might imply old schema
+      if (error.code === '42703') {
+         setToast({ message: "Database schema outdated. Please run the SQL setup again.", type: 'error' });
+         setSetupNeeded(true);
+      } else {
+         setToast({ message: "Error creating transaction. Please try again.", type: 'error' });
+      }
     }
   };
 
@@ -848,9 +928,32 @@ const App = () => {
            {view === 'info' && (
              <div className="space-y-6">
                 <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Amount</span>
-                  <div className="text-3xl font-mono font-bold text-emerald-700 mt-1">KES {transaction.amount.toLocaleString()}</div>
-                  <div className="mt-4 pt-4 border-t border-slate-50">
+                  <div className="flex justify-between items-start mb-4">
+                     <div>
+                       <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Amount</span>
+                       <div className="text-3xl font-mono font-bold text-emerald-700 mt-1">KES {transaction.amount.toLocaleString()}</div>
+                     </div>
+                     {transaction.category && (
+                       <div className="text-right">
+                         <span className="block px-3 py-1 bg-slate-100 rounded-lg text-xs font-bold text-slate-600 mb-1">{transaction.category}</span>
+                         {transaction.quantity ? (
+                           <span className="text-sm text-slate-500 font-medium">{transaction.quantity} kg</span>
+                         ) : null}
+                       </div>
+                     )}
+                  </div>
+                  
+                  {/* Price Analysis */}
+                  {transaction.quantity && transaction.quantity > 0 && (
+                    <div className="bg-emerald-50 p-3 rounded-lg flex items-center justify-between mb-4 border border-emerald-100">
+                       <span className="text-xs text-emerald-800 font-bold">Price per Kg</span>
+                       <span className="text-sm font-mono font-bold text-emerald-800">
+                         ~KES {Math.round(transaction.amount / transaction.quantity).toLocaleString()}/kg
+                       </span>
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t border-slate-50">
                     <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Description</span>
                     <p className="text-slate-700 leading-relaxed">{transaction.description || 'No description provided.'}</p>
                   </div>
@@ -1134,23 +1237,27 @@ const App = () => {
           <div className="animate-in fade-in duration-500 space-y-4">
              {/* Market Insights */}
              <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
-                <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Market Trends (Avg Price/kg)</h3>
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Market Trends (Avg Price/kg)</h3>
+                  <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-full">Real-time</span>
+                </div>
                 <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-                   {[
-                     { name: 'Maize', price: 55, up: true },
-                     { name: 'Potatoes', price: 80, up: false },
-                     { name: 'Onions', price: 120, up: true },
-                     { name: 'Tomatoes', price: 95, up: true }
-                   ].map((item, i) => (
-                     <div key={i} className="min-w-[100px] p-3 rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center">
-                        <span className="text-xs text-slate-500 font-medium mb-1">{item.name}</span>
-                        <span className="text-lg font-bold text-slate-800">KES {item.price}</span>
-                        <div className={`text-[10px] flex items-center gap-1 ${item.up ? 'text-emerald-600' : 'text-red-500'}`}>
-                          <TrendingUp className={`w-3 h-3 ${!item.up && 'rotate-180'}`} />
-                          {item.up ? '+2.4%' : '-1.1%'}
-                        </div>
+                   {marketTrends.length === 0 ? (
+                     <div className="text-xs text-slate-400 w-full text-center italic py-2">
+                       No sales data yet. Start listing produce to see trends!
                      </div>
-                   ))}
+                   ) : (
+                     marketTrends.map((item, i) => (
+                       <div key={i} className="min-w-[100px] p-3 rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center">
+                          <span className="text-xs text-slate-500 font-medium mb-1">{item.name}</span>
+                          <span className="text-lg font-bold text-slate-800 font-mono">KES {item.price}</span>
+                          <div className={`text-[10px] flex items-center gap-1 font-semibold ${item.up ? 'text-emerald-600' : 'text-red-500'}`}>
+                            {item.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                            {item.up ? 'Up' : 'Down'}
+                          </div>
+                       </div>
+                     ))
+                   )}
                 </div>
              </div>
 
@@ -1176,7 +1283,13 @@ const App = () => {
                           </div>
                        </div>
                        <h4 className="font-bold text-slate-800 text-sm truncate">{t.title}</h4>
-                       <p className="text-emerald-700 font-mono font-bold text-sm mt-1">KES {t.amount}</p>
+                       <div className="flex justify-between items-end mt-1">
+                         <p className="text-emerald-700 font-mono font-bold text-sm">KES {t.amount.toLocaleString()}</p>
+                         {t.quantity && t.quantity > 0 && (
+                           <p className="text-[10px] text-slate-400 font-mono">@{Math.round(t.amount/t.quantity)}/kg</p>
+                         )}
+                       </div>
+                       {t.quantity ? <p className="text-slate-400 text-xs mt-0.5">{t.quantity} kg</p> : null}
                        
                        <div className="mt-auto pt-3">
                         {/* Vendor View */}
@@ -1241,13 +1354,40 @@ const App = () => {
                 <h2 className="text-xl font-bold text-slate-800 mb-6">{userRole === 'farmer' ? 'List Produce (Sell)' : 'Create Request (Buy)'}</h2>
                 <form onSubmit={createTransaction} className="space-y-5">
                    <div>
+                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Category</label>
+                     <select 
+                       className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition"
+                       value={newCategory}
+                       onChange={e => setNewCategory(e.target.value)}
+                     >
+                        {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                     </select>
+                   </div>
+                   <div>
                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Title / Item Name</label>
                      <input className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="e.g., 500kg Yellow Corn" value={newTitle} onChange={e => setNewTitle(e.target.value)} required />
                    </div>
-                   <div>
-                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Amount (KES)</label>
-                     <input className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono" type="number" placeholder="50000" value={newAmount} onChange={e => setNewAmount(e.target.value)} required />
+                   <div className="grid grid-cols-2 gap-4">
+                     <div>
+                       <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Quantity (kg)</label>
+                       <input className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono" type="number" placeholder="100" value={newQuantity} onChange={e => setNewQuantity(e.target.value)} required />
+                     </div>
+                     <div>
+                       <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Total Amount (KES)</label>
+                       <input className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono" type="number" placeholder="50000" value={newAmount} onChange={e => setNewAmount(e.target.value)} required />
+                     </div>
                    </div>
+                   
+                   {/* Price per Kg helper */}
+                   {newAmount && newQuantity && (
+                     <div className="bg-emerald-50 p-3 rounded-lg flex items-center justify-between">
+                       <span className="text-xs font-bold text-emerald-800">Est. Price/kg</span>
+                       <span className="text-sm font-mono font-bold text-emerald-700">
+                         KES {Math.round(parseFloat(newAmount) / parseFloat(newQuantity)).toLocaleString()}
+                       </span>
+                     </div>
+                   )}
+
                    <div>
                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Description / Terms</label>
                      <textarea className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none" placeholder="Delivery details, quality specifications..." value={newDesc} onChange={e => setNewDesc(e.target.value)} />

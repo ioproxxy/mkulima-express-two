@@ -1,5 +1,7 @@
 {
   "requestFramePermissions": [
     "camera"
-  ]
+  ],
+  "name": "Generated Mkulima Express",
+  "description": ""
 }
