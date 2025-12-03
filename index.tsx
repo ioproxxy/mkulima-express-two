@@ -484,8 +484,12 @@ const App = () => {
   const [newCategory, setNewCategory] = useState('Maize');
   const [newQuantity, setNewQuantity] = useState('');
 
-  // Trends calculation (REAL LOGIC)
+  // Trends calculation (Rolling 7-Day Average)
   const marketTrends = useMemo(() => {
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+
     // 1. Group transactions by category
     const byCategory: Record<string, Transaction[]> = {};
     
@@ -500,35 +504,64 @@ const App = () => {
 
     // 2. Calculate trends for each category
     return Object.entries(byCategory).map(([name, txs]) => {
-      // Sort desc (newest first) to separate recent vs old
+      // Sort desc (newest first)
       txs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       
-      // Split roughly in half to compare "Now" vs "Before"
-      // If only 1 item, it is both new and old (stable)
-      const half = Math.ceil(txs.length / 2);
-      const recent = txs.slice(0, half);
-      const old = txs.slice(half);
-      
-      const getAvg = (list: Transaction[]) => {
+      const getWeightedAvg = (list: Transaction[]) => {
         if (!list.length) return 0;
         const totalAmt = list.reduce((sum, t) => sum + t.amount, 0);
         const totalQty = list.reduce((sum, t) => sum + (t.quantity || 0), 0);
         return totalQty > 0 ? totalAmt / totalQty : 0;
       };
 
-      const recentPrice = getAvg(recent);
-      const oldPrice = getAvg(old);
-      
-      // Calculate overall Weighted Average Price for display
-      const totalAvg = getAvg(txs);
+      // Define Windows
+      const recentTxs = txs.filter(t => new Date(t.created_at) >= sevenDaysAgo);
+      const previousTxs = txs.filter(t => {
+         const d = new Date(t.created_at);
+         return d >= fourteenDaysAgo && d < sevenDaysAgo;
+      });
 
-      // Trend is UP if recent price is higher than old price
-      // If we have no old data, we consider it stable (trendUp = true/neutral)
-      const trendUp = oldPrice === 0 ? true : recentPrice >= oldPrice;
+      let currentPrice = 0;
+      let trendUp = true; // Default
+
+      if (recentTxs.length > 0) {
+         currentPrice = getWeightedAvg(recentTxs);
+         
+         if (previousTxs.length > 0) {
+            const prevPrice = getWeightedAvg(previousTxs);
+            // Higher price is "Up" (Green) generally, though for buyers it's bad. 
+            // In market context, "Up" usually means value increase.
+            trendUp = currentPrice >= prevPrice;
+         } else {
+            // Fallback: If no data in previous week, look for ANY older data
+            const olderTxs = txs.filter(t => new Date(t.created_at) < sevenDaysAgo);
+            if (olderTxs.length > 0) {
+               const olderPrice = getWeightedAvg(olderTxs);
+               trendUp = currentPrice >= olderPrice;
+            } else if (recentTxs.length > 1) {
+               // Intra-week trend if this is the very first week of data
+               // recentTxs is sorted desc (newest first)
+               const half = Math.ceil(recentTxs.length / 2);
+               const newer = recentTxs.slice(0, half);
+               const older = recentTxs.slice(half);
+               trendUp = getWeightedAvg(newer) >= getWeightedAvg(older);
+            }
+         }
+      } else {
+         // No transactions in the last 7 days
+         // Show the most recent known price as a fallback
+         if (txs.length > 0) {
+            currentPrice = getWeightedAvg([txs[0]]);
+            if (txs.length > 1) {
+               // Compare latest to the running average of the rest
+               trendUp = currentPrice >= getWeightedAvg(txs.slice(1));
+            }
+         }
+      }
       
       return {
         name,
-        price: Math.round(totalAvg),
+        price: Math.round(currentPrice),
         up: trendUp,
         count: txs.length
       };
@@ -1239,7 +1272,7 @@ const App = () => {
              <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
                 <div className="flex justify-between items-center mb-3">
                   <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Market Trends (Avg Price/kg)</h3>
-                  <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-full">Real-time</span>
+                  <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-1 rounded-full font-medium">Rolling 7-Day</span>
                 </div>
                 <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
                    {marketTrends.length === 0 ? (
