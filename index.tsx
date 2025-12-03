@@ -1,127 +1,75 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import QRCode from 'https://esm.sh/react-qr-code';
-import { Html5QrcodeScanner } from 'https://esm.sh/html5-qrcode';
-import { 
-  ShieldCheck, 
-  Sprout, 
-  Store, 
-  Plus, 
-  DollarSign, 
-  Truck, 
-  CheckCircle, 
-  AlertTriangle, 
-  LogOut, 
-  User, 
-  List,
-  ChevronRight,
-  Loader2,
-  Lock,
-  Copy,
-  ShoppingBag,
-  Search,
-  Wallet,
-  TrendingUp,
-  ArrowRightLeft,
-  CreditCard,
-  MessageCircle,
-  QrCode,
-  ScanLine,
-  Gavel,
-  XCircle,
-  Send,
-  Leaf,
-  Handshake,
-  X,
-  Megaphone,
-  Bell,
-  Info,
-  Scale,
-  TrendingDown,
-  Clock
-} from 'https://esm.sh/lucide-react';
+import { createClient } from '@supabase/supabase-js';
+import {
+  Wallet, Leaf, CheckCircle, CreditCard,
+  LogOut, Home, Store, Plus, User, Loader2, X,
+  TrendingUp, ArrowUpRight, ArrowDownRight, Package, Scale,
+  Clock, MapPin, Truck, ShieldCheck, AlertCircle, Search,
+  ChevronRight, MessageSquare, Bell, ArrowDown, ArrowUp, Lock
+} from 'lucide-react';
 
-// --- Configuration ---
-const SUPABASE_URL = 'https://riltljeipcaplvwtejaj.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpbHRsamVpcGNhcGx2d3RlamFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2MTAzMzcsImV4cCI6MjA4MDE4NjMzN30.StgCRcE7brtSvTARLsfmWHXNQvPcyRl8WiPUNuY9v0Y';
+// Initialize Supabase Client
+const supabase = createClient(
+  'https://riltljeipcaplvwtejaj.supabase.co',
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpbHRsamVpcGNhcGx2d3RlamFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2MTAzMzcsImV4cCI6MjA4MDE4NjMzN30.StgCRcE7brtSvTARLsfmWHXNQvPcyRl8WiPUNuY9v0Y'
+);
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-// --- Types ---
-type UserRole = 'farmer' | 'vendor';
-type TransactionStatus = 'listed' | 'offer_made' | 'pending_deposit' | 'in_escrow' | 'shipped' | 'delivered' | 'completed' | 'disputed';
-
+// Types
 interface Transaction {
   id: string;
   created_at: string;
   title: string;
   amount: number;
   description: string;
-  status: TransactionStatus;
-  farmer_id?: string;
+  status: string;
   vendor_id?: string;
-  vendor_email?: string;
-  farmer_email?: string;
-  delivery_pin?: string; // Secret pin for delivery verification
+  farmer_id?: string;
   category?: string;
   quantity?: number;
-  // Timestamps for progress tracking
   offer_made_at?: string;
   contract_formed_at?: string;
-  deposit_paid_at?: string;
+  funds_deposited_at?: string;
   shipped_at?: string;
   delivered_at?: string;
   completed_at?: string;
   disputed_at?: string;
 }
 
-interface WalletData {
-  user_id: string;
-  balance: number;
-}
-
-interface Message {
+interface WalletTransaction {
   id: string;
-  transaction_id: string;
-  sender_id: string;
-  content: string;
   created_at: string;
-  sender_email?: string;
+  amount: number;
+  type: 'deposit' | 'withdrawal' | 'escrow_lock' | 'escrow_release' | 'payment_in';
+  description: string;
+  reference_id?: string;
 }
 
-const CATEGORIES = ['Maize', 'Beans', 'Potatoes', 'Tomatoes', 'Onions', 'Cabbage', 'Rice', 'Wheat', 'Carrots', 'Avocado', 'Mangoes', 'Other'];
-
-// --- Components ---
-
-// 1. Loading Spinner
-const Loading = () => (
-  <div className="flex items-center justify-center min-h-screen bg-slate-50">
-    <div className="flex flex-col items-center gap-4">
-      <div className="relative">
-        <div className="absolute inset-0 bg-emerald-200 rounded-full animate-ping opacity-75"></div>
-        <div className="relative bg-white p-3 rounded-full shadow-lg">
-          <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
-        </div>
-      </div>
-      <p className="text-slate-500 text-sm font-medium tracking-wide">Connecting to Mkulima Express...</p>
-    </div>
-  </div>
-);
-
-// 2. Setup Helper
+// SQL Setup Component
 const SetupRequired = () => {
   const [copied, setCopied] = useState(false);
   
-  const sql = `-- 1. Create Wallets Table
+  const sql = `
+-- 1. Create Wallets Table
 create table if not exists public.wallets (
   user_id uuid references auth.users(id) primary key,
   balance numeric default 0,
   updated_at timestamp with time zone default timezone('utc'::text, now())
 );
 
--- 2. Create Escrow Transactions Table
+-- 2. Create Wallet Transactions Table (History)
+create table if not exists public.wallet_transactions (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  user_id uuid references auth.users(id) not null,
+  amount numeric not null,
+  type text not null, -- 'deposit', 'withdrawal', 'escrow_lock', 'escrow_release', 'payment_in'
+  reference_id uuid,
+  description text
+);
+
+-- 3. Create Escrow Transactions Table
 create table if not exists public.escrow_transactions (
   id uuid default gen_random_uuid() primary key,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -133,19 +81,19 @@ create table if not exists public.escrow_transactions (
   farmer_id uuid references auth.users(id),
   vendor_email text,
   farmer_email text,
-  delivery_pin text default substring(md5(random()::text) from 0 for 7), -- 6 char PIN
+  delivery_pin text default substring(md5(random()::text) from 0 for 7),
   category text default 'Other',
   quantity numeric default 0,
   offer_made_at timestamp with time zone,
   contract_formed_at timestamp with time zone,
-  deposit_paid_at timestamp with time zone,
+  funds_deposited_at timestamp with time zone,
   shipped_at timestamp with time zone,
   delivered_at timestamp with time zone,
   completed_at timestamp with time zone,
   disputed_at timestamp with time zone
 );
 
--- 3. Create Messages Table
+-- 4. Create Messages Table
 create table if not exists public.messages (
   id uuid default gen_random_uuid() primary key,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -155,28 +103,18 @@ create table if not exists public.messages (
   sender_email text
 );
 
--- 4. MIGRATION & COLUMNS (Safe to run multiple times)
-alter table public.escrow_transactions alter column vendor_id drop not null;
+-- 5. Add Missing Columns (Safe Migration)
 do $$ 
 begin 
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='delivery_pin') then
-    alter table public.escrow_transactions add column delivery_pin text default substring(md5(random()::text) from 0 for 7);
-  end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='category') then
-    alter table public.escrow_transactions add column category text default 'Other';
-  end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='quantity') then
-    alter table public.escrow_transactions add column quantity numeric default 0;
-  end if;
-  -- Add timestamp columns
+  -- Timestamps
   if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='offer_made_at') then
     alter table public.escrow_transactions add column offer_made_at timestamp with time zone;
   end if;
   if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='contract_formed_at') then
     alter table public.escrow_transactions add column contract_formed_at timestamp with time zone;
   end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='deposit_paid_at') then
-    alter table public.escrow_transactions add column deposit_paid_at timestamp with time zone;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='funds_deposited_at') then
+    alter table public.escrow_transactions add column funds_deposited_at timestamp with time zone;
   end if;
   if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='shipped_at') then
     alter table public.escrow_transactions add column shipped_at timestamp with time zone;
@@ -190,60 +128,51 @@ begin
   if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='disputed_at') then
     alter table public.escrow_transactions add column disputed_at timestamp with time zone;
   end if;
+  -- Other fields
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='category') then
+    alter table public.escrow_transactions add column category text default 'Other';
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='quantity') then
+    alter table public.escrow_transactions add column quantity numeric default 0;
+  end if;
 end $$;
 
--- 5. ENABLE SECURITY (RLS)
+-- 6. RLS Policies
 alter table public.wallets enable row level security;
+alter table public.wallet_transactions enable row level security;
 alter table public.escrow_transactions enable row level security;
 alter table public.messages enable row level security;
 
--- 6. STRICT POLICIES (Data Isolation)
--- Reset existing policies to avoid conflicts
 drop policy if exists "Access own wallet" on public.wallets;
+drop policy if exists "Access own wallet history" on public.wallet_transactions;
 drop policy if exists "Access transactions" on public.escrow_transactions;
 drop policy if exists "View transactions" on public.escrow_transactions;
 drop policy if exists "Insert transactions" on public.escrow_transactions;
 drop policy if exists "Update transactions" on public.escrow_transactions;
 drop policy if exists "Access messages" on public.messages;
 
--- Wallet: Only owner can see
 create policy "Access own wallet" on public.wallets for all using (auth.uid() = user_id);
+create policy "Access own wallet history" on public.wallet_transactions for all using (auth.uid() = user_id);
 
--- Transactions: 
--- View: You are involved OR it is a public listing
 create policy "View transactions" on public.escrow_transactions for select
-using (
-  vendor_id = auth.uid() or 
-  farmer_id = auth.uid() or 
-  status = 'listed'
-);
+using (vendor_id = auth.uid() or farmer_id = auth.uid() or status = 'listed');
 
--- Insert: You must be the recorded creator
 create policy "Insert transactions" on public.escrow_transactions for insert
-with check (
-  (vendor_id = auth.uid()) or (farmer_id = auth.uid())
-);
+with check ((vendor_id = auth.uid()) or (farmer_id = auth.uid()));
 
--- Update: You are involved OR you are claiming a listing 
--- (Vendor claiming Farmer Listing OR Farmer claiming Vendor Request)
 create policy "Update transactions" on public.escrow_transactions for update
 using (
-  vendor_id = auth.uid() or 
-  farmer_id = auth.uid() or 
-  (status = 'listed' and vendor_id is null) or
+  vendor_id = auth.uid() or farmer_id = auth.uid() or 
+  (status = 'listed' and vendor_id is null) or 
   (status = 'listed' and farmer_id is null)
 );
 
--- Messages: Must be involved in the transaction
 create policy "Access messages" on public.messages for all using (
-  exists (
-    select 1 from public.escrow_transactions t 
-    where t.id = transaction_id 
-    and (t.vendor_id = auth.uid() or t.farmer_id = auth.uid())
-  )
-);`;
+  exists (select 1 from public.escrow_transactions t where t.id = transaction_id and (t.vendor_id = auth.uid() or t.farmer_id = auth.uid()))
+);
+`;
 
-  const copyToClipboard = () => {
+  const copySql = () => {
     navigator.clipboard.writeText(sql);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -251,94 +180,73 @@ create policy "Access messages" on public.messages for all using (
 
   return (
     <div className="p-6 max-w-2xl mx-auto mt-10">
-      <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 shadow-sm">
-        <h2 className="text-xl font-bold text-amber-800 flex items-center gap-2 mb-4">
-          <ShieldCheck className="w-6 h-6" />
-          System Update Required
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xl">
+        <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-4">
+          <ShieldCheck className="w-6 h-6 text-emerald-600" />
+          Database Setup Required
         </h2>
-        <p className="text-amber-700 mb-4 text-sm leading-relaxed">
-          Please run this SQL in your Supabase dashboard to enable the Market visibility, secure transaction features, and Trend Analysis.
+        <p className="text-slate-600 mb-4 text-sm">
+          To enable the wallet and market features, please run this SQL in your Supabase SQL Editor.
         </p>
-        <div className="relative group">
-          <pre className="bg-slate-900 text-slate-50 p-4 rounded-lg text-xs overflow-auto h-64 border border-slate-700 font-mono">
-            {sql}
-          </pre>
+        <div className="relative">
+          <pre className="bg-slate-900 text-slate-50 p-4 rounded-lg text-xs overflow-auto h-64 font-mono">{sql}</pre>
           <button 
-            onClick={copyToClipboard}
-            className="absolute top-2 right-2 bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-md transition flex items-center gap-1 text-xs font-bold"
+            onClick={copySql}
+            className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded text-xs font-bold transition"
           >
-            {copied ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-            {copied ? 'Copied!' : 'Copy SQL'}
+            {copied ? "Copied!" : "Copy SQL"}
           </button>
         </div>
-        <button 
-          onClick={() => window.location.reload()}
-          className="mt-6 w-full bg-amber-600 text-white py-3 rounded-lg font-semibold hover:bg-amber-700 transition shadow-md active:scale-[0.98]"
-        >
-          I've Run the SQL - Reload App
+        <button onClick={() => window.location.reload()} className="mt-4 w-full bg-emerald-600 text-white py-3 rounded-lg font-bold">
+          I have run the SQL
         </button>
       </div>
     </div>
   );
 };
 
-// 2.5 Toast Component
-const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error' | 'info', onClose: () => void }) => {
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      onClose();
-    }, 6000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
-
-  const styles = {
-    success: 'bg-emerald-900 text-emerald-50 border-emerald-700/50',
-    error: 'bg-red-900 text-red-50 border-red-700/50',
-    info: 'bg-blue-900 text-blue-50 border-blue-700/50'
+// Status Badge Component
+const StatusBadge = ({ status }: { status: string }) => {
+  const styles: Record<string, string> = {
+    listed: "bg-slate-100 text-slate-600 border-slate-200",
+    offer_made: "bg-purple-100 text-purple-700 border-purple-200",
+    pending_deposit: "bg-amber-100 text-amber-700 border-amber-200",
+    in_escrow: "bg-blue-100 text-blue-700 border-blue-200",
+    shipped: "bg-indigo-100 text-indigo-700 border-indigo-200",
+    delivered: "bg-teal-100 text-teal-700 border-teal-200",
+    completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
+    disputed: "bg-red-100 text-red-700 border-red-200"
   };
-
-  const icons = {
-    success: <CheckCircle className="w-5 h-5" />,
-    error: <AlertTriangle className="w-5 h-5" />,
-    info: <Info className="w-5 h-5" />
+  const labels: Record<string, string> = {
+    listed: "Market Listed",
+    offer_made: "Offer Pending",
+    pending_deposit: "Awaiting Deposit",
+    in_escrow: "In Escrow",
+    shipped: "In Transit",
+    delivered: "Delivered",
+    completed: "Completed",
+    disputed: "Disputed"
   };
-
-  const bgStyles = {
-    success: 'bg-emerald-800',
-    error: 'bg-red-800',
-    info: 'bg-blue-800'
-  };
-
   return (
-    <div className={`fixed top-4 left-4 right-4 z-[100] flex items-center gap-3 p-4 rounded-xl shadow-2xl transition-all duration-500 animate-[slideIn_0.3s_ease-out] border ${styles[type]}`}>
-      <div className={`p-2 rounded-full shrink-0 ${bgStyles[type]}`}>
-        {icons[type]}
-      </div>
-      <div className="flex-1">
-        <h4 className="font-bold text-sm mb-0.5 capitalize">{type}</h4>
-        <p className="text-xs font-medium opacity-90 leading-relaxed">{message}</p>
-      </div>
-      <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition shrink-0">
-        <XCircle className="w-5 h-5 opacity-50" />
-      </button>
-    </div>
+    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border shadow-sm ${styles[status] || styles.listed}`}>
+      {labels[status] || status}
+    </span>
   );
 };
 
-// 3. Auth Component
-const Auth = ({ onLogin }: { onLogin: () => void }) => {
+// Auth Screen Component
+const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('vendor');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState("vendor");
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleAuth = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setToast(null);
-
+    setError(null);
     try {
       if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -347,944 +255,756 @@ const Auth = ({ onLogin }: { onLogin: () => void }) => {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: {
-            data: { role },
-            emailRedirectTo: window.location.origin
-          },
+          options: { data: { role } }
         });
         if (error) throw error;
-
-        // Check if session is null (implies email verification required)
         if (data.user && !data.session) {
-          setToast({
-             message: "Account created successfully! We've sent a verification link to your email. Please verify to log in.",
-             type: 'success'
-          });
-          setIsLogin(true); // Switch to login view
+          setError("Check email for verification link.");
           setLoading(false);
           return;
         }
       }
       onLogin();
     } catch (err: any) {
-      setToast({ message: err.message, type: 'error' });
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 relative">
-      {/* Toast Notification */}
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-slate-100 flex items-center justify-center p-6">
+      <div className="bg-white w-full max-w-md p-8 rounded-3xl shadow-2xl shadow-emerald-900/10 border border-white/50 backdrop-blur-xl relative overflow-hidden">
+        {/* Decorative blobs */}
+        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-100 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 opacity-50"></div>
+        <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-100 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 opacity-50"></div>
 
-      <div className="bg-white w-full max-w-md p-8 rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-100 relative overflow-hidden">
-         {/* Background Decorations */}
-        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-0 opacity-50"></div>
-        <div className="absolute bottom-0 left-0 w-24 h-24 bg-emerald-50 rounded-tr-full -z-0 opacity-50"></div>
-
-        <div className="flex flex-col items-center mb-8 relative z-10">
-          <div className="w-20 h-20 bg-emerald-50 rounded-2xl flex items-center justify-center mb-5 shadow-sm border border-emerald-100 transform rotate-3 hover:rotate-0 transition duration-300 group">
-             <div className="relative">
-                <Sprout className="w-10 h-10 text-emerald-600 absolute -top-1 -left-1 opacity-20 group-hover:scale-110 transition" />
-                <Sprout className="w-10 h-10 text-emerald-700 relative z-10" />
-             </div>
+        <div className="relative z-10">
+          <div className="flex justify-center mb-6">
+            <div className="bg-emerald-600 p-4 rounded-2xl shadow-lg shadow-emerald-600/30">
+              <Leaf className="w-8 h-8 text-white" />
+            </div>
           </div>
-          <h1 className="text-3xl font-extrabold text-emerald-950 tracking-tight text-center">Mkulima Express</h1>
-          <p className="text-slate-500 text-center mt-2 font-medium text-sm">Trusted Escrow for Farmers & Vendors</p>
+          
+          <h1 className="text-3xl font-extrabold text-slate-800 text-center mb-2 tracking-tight">Mkulima Express</h1>
+          <p className="text-slate-500 text-center mb-8 text-sm font-medium">Secure Escrow for Modern Agriculture</p>
+          
+          {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 border border-red-100 flex items-center gap-2"><AlertCircle className="w-4 h-4"/>{error}</div>}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase ml-1">Email</label>
+              <input type="email" required className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition font-medium text-slate-800" value={email} onChange={e => setEmail(e.target.value)} placeholder="hello@example.com" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase ml-1">Password</label>
+              <input type="password" required className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition font-medium text-slate-800" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+            </div>
+
+            {!isLogin && (
+              <div className="grid grid-cols-2 gap-4 mt-2">
+                <button type="button" onClick={() => setRole('vendor')} className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all duration-200 ${role === 'vendor' ? 'border-emerald-500 bg-emerald-50 text-emerald-800 shadow-md scale-[1.02]' : 'border-slate-100 bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
+                  <Store className="w-6 h-6" /> <span className="font-bold text-sm">Vendor</span>
+                </button>
+                <button type="button" onClick={() => setRole('farmer')} className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all duration-200 ${role === 'farmer' ? 'border-emerald-500 bg-emerald-50 text-emerald-800 shadow-md scale-[1.02]' : 'border-slate-100 bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
+                  <Leaf className="w-6 h-6" /> <span className="font-bold text-sm">Farmer</span>
+                </button>
+              </div>
+            )}
+
+            <button disabled={loading} className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-emerald-700/20 transition-all active:scale-[0.98] flex justify-center items-center mt-6">
+              {loading ? <Loader2 className="animate-spin" /> : (isLogin ? "Sign In" : "Create Account")}
+            </button>
+          </form>
+          
+          <p className="text-center mt-8 text-slate-500 text-sm">
+            <button onClick={() => setIsLogin(!isLogin)} className="text-emerald-700 font-bold hover:underline">
+              {isLogin ? "New here? Create Account" : "Already have an account? Log In"}
+            </button>
+          </p>
         </div>
-
-        <form onSubmit={handleAuth} className="space-y-5 relative z-10">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 ml-1">Email Address</label>
-            <div className="relative">
-              <input 
-                type="email" 
-                required
-                className="w-full p-4 pl-12 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium text-slate-800"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-              />
-              <User className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 ml-1">Password</label>
-            <div className="relative">
-              <input 
-                type="password" 
-                required
-                className="w-full p-4 pl-12 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium text-slate-800"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-              />
-              <Lock className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-            </div>
-          </div>
-
-          {!isLogin && (
-            <div className="grid grid-cols-2 gap-4 mt-2 animate-in slide-in-from-top-2 duration-300">
-              <button
-                type="button"
-                onClick={() => setRole('vendor')}
-                className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition duration-200 active:scale-95 ${role === 'vendor' ? 'border-emerald-500 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-500' : 'border-slate-100 bg-white text-slate-400 hover:border-slate-200'}`}
-              >
-                <Store className="w-6 h-6" />
-                <span className="text-sm font-bold">Vendor</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setRole('farmer')}
-                className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition duration-200 active:scale-95 ${role === 'farmer' ? 'border-emerald-500 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-500' : 'border-slate-100 bg-white text-slate-400 hover:border-slate-200'}`}
-              >
-                <Sprout className="w-6 h-6" />
-                <span className="text-sm font-bold">Farmer</span>
-              </button>
-            </div>
-          )}
-
-          <button 
-            type="submit" 
-            disabled={loading}
-            className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-emerald-700/30 transition active:scale-[0.98] mt-4 flex items-center justify-center gap-2"
-          >
-            {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : (isLogin ? 'Sign In' : 'Create Account')}
-            {!loading && <ChevronRight className="w-5 h-5" />}
-          </button>
-        </form>
-
-        <p className="text-center mt-8 text-slate-500 text-sm relative z-10">
-          {isLogin ? "New to Mkulima Express? " : "Already have an account? "}
-          <button 
-             onClick={() => {
-               setIsLogin(!isLogin);
-               setToast(null);
-             }} 
-             className="text-emerald-700 font-bold hover:underline transition"
-          >
-            {isLogin ? 'Create Account' : 'Log In'}
-          </button>
-        </p>
       </div>
     </div>
   );
 };
 
-// 4. Status Helpers
-const StatusBadge = ({ status }: { status: TransactionStatus }) => {
-  const styles = {
-    listed: 'bg-slate-100 text-slate-700 border-slate-200',
-    offer_made: 'bg-purple-50 text-purple-700 border-purple-200',
-    pending_deposit: 'bg-amber-50 text-amber-700 border-amber-200',
-    in_escrow: 'bg-blue-50 text-blue-700 border-blue-200',
-    shipped: 'bg-indigo-50 text-indigo-700 border-indigo-200',
-    delivered: 'bg-teal-50 text-teal-700 border-teal-200',
-    completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    disputed: 'bg-red-50 text-red-700 border-red-200',
+// Formatter
+const formatDate = (dateStr?: string) => {
+  if (!dateStr) return null;
+  return new Date(dateStr).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+};
+
+// Timeline Step Component
+const TimelineStep = ({ title, date, status, isLast }: { title: string, date?: string, status: 'done' | 'current' | 'pending', isLast?: boolean }) => (
+  <div className="flex gap-4 group">
+    <div className="flex flex-col items-center">
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 z-10 border-2 transition-all duration-300 ${
+        status === 'done' ? 'bg-emerald-600 border-emerald-600 text-white shadow-md shadow-emerald-600/20' :
+        status === 'current' ? 'bg-white border-emerald-600 text-emerald-600 ring-4 ring-emerald-100 scale-110' :
+        'bg-slate-50 border-slate-200 text-slate-300'
+      }`}>
+        {status === 'done' ? <CheckCircle className="w-5 h-5" /> : status === 'current' ? <div className="w-3 h-3 bg-emerald-600 rounded-full animate-pulse" /> : <div className="w-2 h-2 bg-slate-300 rounded-full" />}
+      </div>
+      {!isLast && <div className={`w-0.5 flex-1 my-1 transition-colors duration-300 ${status === 'done' ? 'bg-emerald-500' : 'bg-slate-100'}`} />}
+    </div>
+    <div className={`pb-8 pt-1.5 ${status === 'pending' ? 'opacity-40 blur-[0.5px] transition-all group-hover:blur-0 group-hover:opacity-70' : 'opacity-100'}`}>
+      <h4 className={`font-bold text-sm ${status === 'current' ? 'text-emerald-800' : 'text-slate-700'}`}>{title}</h4>
+      {date && (
+        <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 font-medium">
+          <Clock className="w-3 h-3" />
+          {formatDate(date)}
+        </div>
+      )}
+    </div>
+  </div>
+);
+
+// Transaction Details Component
+const TransactionDetails = ({ 
+  transaction: t, 
+  role, 
+  userId, 
+  onClose, 
+  onUpdate 
+}: { 
+  transaction: Transaction, 
+  role: string, 
+  userId: string, 
+  onClose: () => void,
+  onUpdate: (txId: string, status: string, field: string) => void
+}) => {
+  const isBuyer = t.vendor_id === userId;
+  const isSeller = t.farmer_id === userId;
+  const [updating, setUpdating] = useState(false);
+  const [activeTab, setActiveTab] = useState('status'); // status, chat
+
+  // Messages Mock for UI (In real app, fetch these)
+  const [message, setMessage] = useState('');
+  
+  const handleAction = async (newStatus: string, timestampField: string) => {
+    setUpdating(true);
+    await onUpdate(t.id, newStatus, timestampField);
+    setUpdating(false);
   };
 
-  const labels = {
-    listed: 'Market Listed',
-    offer_made: 'Offer Received',
-    pending_deposit: 'Awaiting Deposit',
-    in_escrow: 'Secure in Escrow',
-    shipped: 'On The Way',
-    delivered: 'Delivered',
-    completed: 'Transaction Complete',
-    disputed: 'Under Dispute',
-  };
+  const steps = [
+    { title: "Listed on Market", date: t.created_at, status: 'done' },
+    { title: "Offer Made", date: t.offer_made_at, status: t.offer_made_at ? 'done' : t.status === 'listed' ? 'pending' : 'done' },
+    { title: "Contract Formed", date: t.contract_formed_at, status: t.contract_formed_at ? 'done' : t.status === 'offer_made' ? 'current' : t.status === 'listed' ? 'pending' : 'done' },
+    { title: "Funds Secured in Escrow", date: t.funds_deposited_at, status: t.funds_deposited_at ? 'done' : t.status === 'pending_deposit' ? 'current' : ['listed', 'offer_made'].includes(t.status) ? 'pending' : 'done' },
+    { title: "Goods Shipped", date: t.shipped_at, status: t.shipped_at ? 'done' : t.status === 'in_escrow' ? 'current' : ['listed', 'offer_made', 'pending_deposit'].includes(t.status) ? 'pending' : 'done' },
+    { title: "Delivered", date: t.delivered_at, status: t.delivered_at ? 'done' : t.status === 'shipped' ? 'current' : ['listed', 'offer_made', 'pending_deposit', 'in_escrow'].includes(t.status) ? 'pending' : 'done' },
+    { title: "Funds Released (Complete)", date: t.completed_at, status: t.completed_at ? 'done' : t.status === 'delivered' ? 'current' : 'pending' }
+  ];
 
   return (
-    <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${styles[status]}`}>
-      {labels[status]}
-    </span>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
+      <div className="bg-white w-full max-w-md max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 animate-in slide-in-from-bottom-10 duration-300">
+        {/* Header */}
+        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-20">
+          <div>
+            <h2 className="font-extrabold text-xl text-slate-800 leading-tight line-clamp-1">{t.title}</h2>
+            <div className="flex items-center gap-2 mt-1.5">
+              <StatusBadge status={t.status} />
+              <span className="text-xs text-slate-400 font-mono tracking-wide">#{t.id.slice(0,6)}</span>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 bg-slate-50 hover:bg-slate-100 rounded-full transition text-slate-500 hover:text-slate-800">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Dispute Banner */}
+        {t.status === 'disputed' && (
+          <div className="bg-red-50 px-5 py-3 border-b border-red-100 flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-sm font-bold text-red-700">Transaction Disputed</h3>
+              <p className="text-xs text-red-600/80 mt-0.5">Funds are frozen. Please use the chat to resolve the issue with the other party or request admin help.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div className="flex border-b border-slate-100">
+          <button 
+            onClick={() => setActiveTab('status')}
+            className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'status' ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+          >
+            Status & Details
+          </button>
+          <button 
+            onClick={() => setActiveTab('chat')}
+            className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'chat' ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+          >
+            Chat & Support
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-0 scroll-smooth">
+          {activeTab === 'status' ? (
+            <>
+              {/* Info Card */}
+              <div className="p-5 bg-slate-50/50 border-b border-slate-100 space-y-4">
+                <div className="flex gap-3">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1"><CreditCard className="w-3 h-3"/> Amount</span>
+                    <div className="text-2xl font-mono font-bold text-emerald-700 tracking-tight">KES {t.amount.toLocaleString()}</div>
+                  </div>
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1"><Scale className="w-3 h-3"/> Quantity</span>
+                    <div className="text-2xl font-bold text-slate-700 tracking-tight">{t.quantity} <span className="text-sm font-normal text-slate-400">kg</span></div>
+                  </div>
+                </div>
+                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Description</span>
+                  <p className="text-sm text-slate-600 leading-relaxed">{t.description || "No specific details provided."}</p>
+                </div>
+              </div>
+
+              {/* Timeline */}
+              <div className="p-6">
+                <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2 text-sm uppercase tracking-wider">
+                  <TrendingUp className="w-4 h-4 text-emerald-600" /> Transaction Timeline
+                </h3>
+                <div className="pl-2">
+                  {steps.map((step, idx) => (
+                    <TimelineStep 
+                      key={idx} 
+                      {...step} 
+                      isLast={idx === steps.length - 1} 
+                      status={step.status as any} 
+                    />
+                  ))}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col h-full bg-slate-50">
+              <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+                <div className="text-center py-6">
+                  <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
+                    <MessageSquare className="w-6 h-6" />
+                  </div>
+                  <p className="text-slate-500 text-sm">Secure Chat</p>
+                  <p className="text-slate-400 text-xs">Messages are end-to-end encrypted.</p>
+                </div>
+                {/* Mock Message */}
+                <div className="flex justify-end">
+                  <div className="bg-emerald-600 text-white p-3 rounded-2xl rounded-tr-none max-w-[80%] shadow-md text-sm">
+                    Hi! Is the produce ready for pickup?
+                  </div>
+                </div>
+                <div className="flex justify-start">
+                  <div className="bg-white text-slate-700 p-3 rounded-2xl rounded-tl-none max-w-[80%] shadow-sm border border-slate-200 text-sm">
+                    Yes, it's packed and ready.
+                  </div>
+                </div>
+              </div>
+              <div className="p-3 bg-white border-t border-slate-200">
+                <div className="flex gap-2">
+                  <input 
+                    className="flex-1 bg-slate-100 border-transparent focus:bg-white focus:border-emerald-500 focus:ring-0 rounded-xl px-4 py-3 text-sm transition"
+                    placeholder="Type a message..."
+                    value={message}
+                    onChange={e => setMessage(e.target.value)}
+                  />
+                  <button className="bg-emerald-600 hover:bg-emerald-700 text-white p-3 rounded-xl transition shadow-lg shadow-emerald-600/20">
+                    <ArrowUpRight className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Actions Footer */}
+        {activeTab === 'status' && (
+          <div className="p-4 border-t border-slate-100 bg-white sticky bottom-0 z-20 pb-6">
+            {isSeller && t.status === 'offer_made' && (
+              <button 
+                onClick={() => handleAction('pending_deposit', 'contract_formed_at')}
+                disabled={updating}
+                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
+              >
+                {updating ? <Loader2 className="animate-spin" /> : "Accept Offer & Form Contract"}
+              </button>
+            )}
+            
+            {isBuyer && t.status === 'pending_deposit' && (
+              <button 
+                onClick={() => handleAction('in_escrow', 'funds_deposited_at')}
+                disabled={updating}
+                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
+              >
+                {updating ? <Loader2 className="animate-spin" /> : <><CreditCard className="w-5 h-5" /> Deposit Funds to Escrow</>}
+              </button>
+            )}
+
+            {isSeller && t.status === 'in_escrow' && (
+              <button 
+                onClick={() => handleAction('shipped', 'shipped_at')}
+                disabled={updating}
+                className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 transition flex justify-center items-center gap-2 shadow-lg shadow-indigo-600/20 active:scale-[0.98]"
+              >
+                {updating ? <Loader2 className="animate-spin" /> : <><Truck className="w-5 h-5" /> Mark as Shipped</>}
+              </button>
+            )}
+
+            {isBuyer && t.status === 'shipped' && (
+              <button 
+                onClick={() => handleAction('delivered', 'delivered_at')}
+                disabled={updating}
+                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
+              >
+                {updating ? <Loader2 className="animate-spin" /> : <><MapPin className="w-5 h-5" /> Confirm Delivery</>}
+              </button>
+            )}
+
+            {isBuyer && t.status === 'delivered' && (
+              <button 
+                onClick={() => handleAction('completed', 'completed_at')}
+                disabled={updating}
+                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
+              >
+                {updating ? <Loader2 className="animate-spin" /> : <><CheckCircle className="w-5 h-5" /> Release Funds to Farmer</>}
+              </button>
+            )}
+
+            {['pending_deposit', 'in_escrow', 'shipped', 'delivered'].includes(t.status) && !t.disputed_at && (
+              <button 
+                onClick={() => handleAction('disputed', 'disputed_at')}
+                disabled={updating}
+                className="mt-3 w-full bg-white text-red-500 border border-red-200 py-3 rounded-xl font-bold hover:bg-red-50 transition flex justify-center items-center gap-2 active:scale-[0.98]"
+              >
+                <AlertCircle className="w-5 h-5" /> Raise Dispute
+              </button>
+            )}
+
+            {t.status === 'disputed' && (
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                    <button className="bg-slate-800 text-white py-3 rounded-xl font-bold text-xs">Request Admin</button>
+                    <button 
+                        onClick={() => handleAction(t.shipped_at ? 'shipped' : 'in_escrow', 'disputed_at')} 
+                        className="bg-emerald-100 text-emerald-700 py-3 rounded-xl font-bold text-xs"
+                    >
+                        Resolve Dispute
+                    </button>
+                </div>
+            )}
+            
+            {t.status === 'completed' && (
+              <div className="bg-emerald-50 text-emerald-800 text-center py-3 rounded-xl font-bold text-sm border border-emerald-100 flex items-center justify-center gap-2">
+                <CheckCircle className="w-5 h-5" /> Transaction Completed
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 };
 
-// 5. Main App Component
+// Wallet View Component
+const WalletView = ({ wallet, transactions, onTopUp, onWithdraw }: { 
+  wallet: any, 
+  transactions: WalletTransaction[],
+  onTopUp: (amount: number) => Promise<void>,
+  onWithdraw: (amount: number, phone: string) => Promise<void>
+}) => {
+  const [activeAction, setActiveAction] = useState<'none' | 'topup' | 'withdraw'>('none');
+  const [amount, setAmount] = useState('');
+  const [phone, setPhone] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      if (activeAction === 'topup') await onTopUp(Number(amount));
+      if (activeAction === 'withdraw') await onWithdraw(Number(amount), phone);
+      setActiveAction('none');
+      setAmount('');
+      setPhone('');
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Balance Card */}
+      <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-3xl p-6 text-white shadow-xl shadow-slate-900/20 relative overflow-hidden group">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+        <div className="absolute bottom-0 left-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
+        <div className="relative z-10">
+          <div className="flex justify-between items-start mb-2">
+            <div className="flex items-center gap-2 text-slate-300 text-xs font-bold uppercase tracking-wider">
+              <Wallet className="w-4 h-4" /> Total Balance
+            </div>
+            <div className="px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold text-white/80 backdrop-blur-sm border border-white/10">Active</div>
+          </div>
+          <div className="text-4xl font-mono font-bold tracking-tighter text-white mb-6">KES {wallet?.balance.toLocaleString() ?? '...'}</div>
+          <div className="flex gap-3">
+            <button onClick={() => setActiveAction('topup')} className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
+              <Plus className="w-4 h-4" /> Top Up
+            </button>
+            <button onClick={() => setActiveAction('withdraw')} className="flex-1 bg-white/10 border border-white/20 text-white px-4 py-3 rounded-xl text-sm font-bold backdrop-blur-md hover:bg-white/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
+              <ArrowUpRight className="w-4 h-4" /> Withdraw
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Action Forms */}
+      {activeAction !== 'none' && (
+        <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 animate-in slide-in-from-top-2">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-slate-800">{activeAction === 'topup' ? 'Top Up Wallet' : 'Withdraw Funds'}</h3>
+            <button onClick={() => setActiveAction('none')} className="p-1 hover:bg-slate-100 rounded-full"><X className="w-4 h-4 text-slate-400" /></button>
+          </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase ml-1">Amount (KES)</label>
+              <input type="number" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono font-medium" value={amount} onChange={e => setAmount(e.target.value)} placeholder="1000" />
+            </div>
+            {activeAction === 'withdraw' && (
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase ml-1">M-Pesa Number</label>
+                <input type="tel" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-medium" value={phone} onChange={e => setPhone(e.target.value)} placeholder="2547XXXXXXXX" />
+              </div>
+            )}
+            <button disabled={loading} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition flex justify-center items-center gap-2">
+              {loading ? <Loader2 className="animate-spin w-4 h-4" /> : "Confirm Transaction"}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {/* Transactions List */}
+      <div>
+        <h3 className="font-bold text-slate-800 mb-4 px-1">Transaction History</h3>
+        {transactions.length === 0 ? (
+          <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-200">
+            <p className="text-slate-400 text-sm">No transactions yet.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {transactions.map(tx => (
+              <div key={tx.id} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center gap-4">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                  tx.type === 'deposit' || tx.type === 'payment_in' ? 'bg-emerald-100 text-emerald-600' : 
+                  tx.type === 'escrow_lock' ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {tx.type === 'deposit' || tx.type === 'payment_in' ? <ArrowDown className="w-5 h-5" /> : 
+                   tx.type === 'escrow_lock' ? <Lock className="w-4 h-4" /> : <ArrowUp className="w-5 h-5" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-start">
+                    <h4 className="font-bold text-slate-700 text-sm truncate">{tx.description}</h4>
+                    <span className={`font-mono font-bold text-sm ${
+                      tx.type === 'deposit' || tx.type === 'payment_in' ? 'text-emerald-600' : 'text-slate-800'
+                    }`}>
+                      {tx.type === 'deposit' || tx.type === 'payment_in' ? '+' : '-'} {Math.abs(tx.amount).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center mt-1">
+                    <p className="text-xs text-slate-400 capitalize">{tx.type.replace('_', ' ')}</p>
+                    <p className="text-xs text-slate-400">{formatDate(tx.created_at)}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Main App Component
 const App = () => {
   const [session, setSession] = useState<any>(null);
-  const [userRole, setUserRole] = useState<UserRole>('vendor'); // Default fallback
-  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [wallet, setWallet] = useState<any>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'market' | 'wallet' | 'create'>('dashboard');
-  const [setupNeeded, setSetupNeeded] = useState(false);
-  const [wallet, setWallet] = useState<WalletData | null>(null);
+  const [walletTransactions, setWalletTransactions] = useState<WalletTransaction[]>([]);
+  const [dashboardFilter, setDashboardFilter] = useState('all');
   const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
-  const [toast, setToast] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
-
-  // Forms
-  const [newTitle, setNewTitle] = useState('');
-  const [newAmount, setNewAmount] = useState('');
-  const [newDesc, setNewDesc] = useState('');
-  const [newCategory, setNewCategory] = useState('Maize');
-  const [newQuantity, setNewQuantity] = useState('');
-
-  // Trends calculation (Rolling 7-Day Average)
-  const marketTrends = useMemo(() => {
-    const now = new Date();
-    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-
-    // 1. Group transactions by category
-    const byCategory: Record<string, Transaction[]> = {};
-    
-    transactions.forEach(t => {
-      // Filter valid transactions for price calculation
-      if (t.status === 'disputed' || !t.category || !t.quantity || t.quantity <= 0) return;
-      
-      const cat = t.category;
-      if (!byCategory[cat]) byCategory[cat] = [];
-      byCategory[cat].push(t);
-    });
-
-    // 2. Calculate trends for each category
-    return Object.entries(byCategory).map(([name, txs]) => {
-      // Sort desc (newest first)
-      txs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      
-      const getWeightedAvg = (list: Transaction[]) => {
-        if (!list.length) return 0;
-        const totalAmt = list.reduce((sum, t) => sum + t.amount, 0);
-        const totalQty = list.reduce((sum, t) => sum + (t.quantity || 0), 0);
-        return totalQty > 0 ? totalAmt / totalQty : 0;
-      };
-
-      // Define Windows
-      const recentTxs = txs.filter(t => new Date(t.created_at) >= sevenDaysAgo);
-      const previousTxs = txs.filter(t => {
-         const d = new Date(t.created_at);
-         return d >= fourteenDaysAgo && d < sevenDaysAgo;
-      });
-
-      let currentPrice = 0;
-      let trendUp = true; // Default
-
-      if (recentTxs.length > 0) {
-         currentPrice = getWeightedAvg(recentTxs);
-         
-         if (previousTxs.length > 0) {
-            const prevPrice = getWeightedAvg(previousTxs);
-            // Higher price is "Up" (Green) generally, though for buyers it's bad. 
-            // In market context, "Up" usually means value increase.
-            trendUp = currentPrice >= prevPrice;
-         } else {
-            // Fallback: If no data in previous week, look for ANY older data
-            const olderTxs = txs.filter(t => new Date(t.created_at) < sevenDaysAgo);
-            if (olderTxs.length > 0) {
-               const olderPrice = getWeightedAvg(olderTxs);
-               trendUp = currentPrice >= olderPrice;
-            } else if (recentTxs.length > 1) {
-               // Intra-week trend if this is the very first week of data
-               // recentTxs is sorted desc (newest first)
-               const half = Math.ceil(recentTxs.length / 2);
-               const newer = recentTxs.slice(0, half);
-               const older = recentTxs.slice(half);
-               trendUp = getWeightedAvg(newer) >= getWeightedAvg(older);
-            }
-         }
-      } else {
-         // No transactions in the last 7 days
-         // Show the most recent known price as a fallback
-         if (txs.length > 0) {
-            currentPrice = getWeightedAvg([txs[0]]);
-            if (txs.length > 1) {
-               // Compare latest to the running average of the rest
-               trendUp = currentPrice >= getWeightedAvg(txs.slice(1));
-            }
-         }
-      }
-      
-      return {
-        name,
-        price: Math.round(currentPrice),
-        up: trendUp,
-        count: txs.length
-      };
-    })
-    .filter(g => g.price > 0) // Hide zero price items
-    .sort((a, b) => b.price - a.price); // Sort by highest value items
-  }, [transactions]);
+  const [role, setRole] = useState("vendor");
+  const [showSetup, setShowSetup] = useState(false);
+  
+  // Create Form State
+  const [createForm, setCreateForm] = useState({
+    title: '',
+    category: 'Maize',
+    quantity: '',
+    amount: '',
+    description: ''
+  });
+  const [creating, setCreating] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
-        setUserRole(session.user.user_metadata.role || 'vendor');
-        fetchData();
-        fetchWallet(session.user.id);
-      } else {
-        setLoading(false);
+        setRole(session.user.user_metadata.role || 'vendor');
+        fetchData(session.user.id);
       }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        setUserRole(session.user.user_metadata.role || 'vendor');
-        fetchData();
-        fetchWallet(session.user.id);
-      } else {
-        setLoading(false);
+        setRole(session.user.user_metadata.role || 'vendor');
+        fetchData(session.user.id);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // Real-time Push Notifications Subscription
-  useEffect(() => {
-    if (!session) return;
-
-    // Listen for Messages
-    const msgChannel = supabase.channel('msg-notifications')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        async (payload) => {
-          const newMsg = payload.new as Message;
-          if (newMsg.sender_id === session.user.id) return; // Ignore own messages
-
-          // Verify involvement (security/relevance check)
-          const { data: tx } = await supabase.from('escrow_transactions').select('title, farmer_id, vendor_id').eq('id', newMsg.transaction_id).single();
-          
-          if (tx && (tx.farmer_id === session.user.id || tx.vendor_id === session.user.id)) {
-            setToast({ message: `New message in "${tx.title}"`, type: 'info' });
-          }
-        }
-      )
-      .subscribe();
-
-    // Listen for Transaction Updates (Status Changes)
-    const txChannel = supabase.channel('tx-notifications')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'escrow_transactions' },
-        (payload) => {
-           const newTx = payload.new as Transaction;
-           const oldTx = payload.old as Transaction;
-
-           if (newTx.status === oldTx.status) return;
-
-           const isFarmer = newTx.farmer_id === session.user.id;
-           const isVendor = newTx.vendor_id === session.user.id;
-
-           if (!isFarmer && !isVendor) return;
-
-           let msg = '';
-           if (newTx.status === 'offer_made' && isFarmer) msg = `New Offer: Vendor wants "${newTx.title}"`;
-           else if (newTx.status === 'pending_deposit' && isVendor) msg = `Offer Accepted: Please fund "${newTx.title}"`;
-           else if (newTx.status === 'in_escrow' && isFarmer) msg = `Funded: Safe to ship "${newTx.title}"`;
-           else if (newTx.status === 'shipped' && isVendor) msg = `Shipped: "${newTx.title}" is on the way!`;
-           else if (newTx.status === 'delivered') msg = `Delivered: "${newTx.title}" has arrived.`;
-           else if (newTx.status === 'completed' && isFarmer) msg = `Paid: Funds released for "${newTx.title}"`;
-           else if (newTx.status === 'disputed') msg = `Alert: Dispute raised for "${newTx.title}"`;
-
-           if (msg) {
-             setToast({ message: msg, type: newTx.status === 'disputed' ? 'error' : 'success' });
-             fetchData(); // Refresh data to show new status in UI
-           }
-        }
-      )
-      .subscribe();
-
-    return () => { 
-      supabase.removeChannel(msgChannel);
-      supabase.removeChannel(txChannel);
-    };
-  }, [session]);
-
-  const fetchData = async () => {
-    setLoading(true);
-    // RLS filters this automatically on the backend now
-    const { data, error } = await supabase
-      .from('escrow_transactions')
-      .select('*')
-      .order('created_at', { ascending: false });
-
+  const fetchData = async (userId: string) => {
+    const { data: txs, error } = await supabase.from('escrow_transactions').select('*').order('created_at', { ascending: false });
     if (error) {
-      if (error.code === '42P01') setSetupNeeded(true); // Table undefined
+        if (error.code === '42P01' || error.message.includes('column')) setShowSetup(true); // Table or Column missing
     } else {
-      setTransactions(data || []);
+        setTransactions(txs || []);
     }
-    setLoading(false);
-  };
-
-  const fetchWallet = async (userId: string) => {
-    const { data, error } = await supabase.from('wallets').select('*').eq('user_id', userId).single();
-    if (error && error.code === 'PGRST116') {
-      // Wallet doesn't exist, create it
-      const { data: newData, error: createError } = await supabase
-        .from('wallets')
-        .insert([{ user_id: userId, balance: 0 }])
-        .select()
-        .single();
-      if (newData) setWallet(newData);
-    } else if (data) {
-      setWallet(data);
-    }
-  };
-
-  const createTransaction = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!session) return;
     
-    // Vendor creates a REQUEST, Farmer creates a LISTING
-    const isVendor = userRole === 'vendor';
+    const { data: walletData } = await supabase.from('wallets').select('*').eq('user_id', userId).single();
+    if (walletData) setWallet(walletData);
+    else {
+      // Try to create wallet, if it fails due to table missing, showSetup will handle it eventually
+      const { data: newWallet } = await supabase.from('wallets').insert([{ user_id: userId, balance: 0 }]).select().single();
+      if (newWallet) setWallet(newWallet);
+    }
+
+    const { data: walletTx } = await supabase.from('wallet_transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false });
+    setWalletTransactions(walletTx || []);
+  };
+
+  // Market Trends Calculation
+  const marketTrends = useMemo(() => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const fourteenDaysAgo = new Date();
+    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
+
+    const categories = ['Maize', 'Beans', 'Potatoes', 'Tomatoes', 'Onions', 'Rice', 'Bananas'];
     
-    const { error } = await supabase.from('escrow_transactions').insert({
-      title: newTitle,
-      amount: parseFloat(newAmount),
-      description: newDesc,
-      category: newCategory,
-      quantity: parseFloat(newQuantity),
-      vendor_id: isVendor ? session.user.id : null,
-      farmer_id: isVendor ? null : session.user.id,
-      vendor_email: isVendor ? session.user.email : null,
-      farmer_email: isVendor ? null : session.user.email,
-      status: 'listed', // Both default to 'listed' so they are visible in market
-    });
+    return categories.map(cat => {
+      const catTxs = transactions.filter(t => 
+        t.category === cat && 
+        t.amount > 0 && 
+        (t.quantity || 0) > 0 &&
+        t.status !== 'disputed'
+      );
 
-    if (!error) {
-      setNewTitle('');
-      setNewAmount('');
-      setNewDesc('');
-      setNewQuantity('');
-      setNewCategory('Maize');
-      setActiveTab('dashboard');
-      fetchData();
-      setToast({ message: 'Listed successfully on the market!', type: 'success' });
-    } else {
-      // Check for column error, might imply old schema
-      if (error.code === '42703') {
-         setToast({ message: "Database schema outdated. Please run the SQL setup again.", type: 'error' });
-         setSetupNeeded(true);
-      } else {
-         setToast({ message: "Error creating transaction. Please try again.", type: 'error' });
-      }
-    }
-  };
-
-  const handleMakeOffer = async (transactionId: string) => {
-    if (!session || userRole !== 'vendor') return;
-
-    const { error } = await supabase
-      .from('escrow_transactions')
-      .update({ 
-        vendor_id: session.user.id, 
-        vendor_email: session.user.email,
-        status: 'offer_made', // Move to offer_made stage
-        offer_made_at: new Date().toISOString()
-      })
-      .eq('id', transactionId)
-      // Safety check: ensure it is still listed and unclaimed
-      .eq('status', 'listed')
-      .is('vendor_id', null);
-
-    if (!error) {
-      fetchData();
-      setActiveTransactionId(transactionId);
-      setToast({ message: 'Offer sent to Farmer!', type: 'success' });
-    } else {
-      setToast({ message: "Could not make offer. It may have been taken.", type: 'error' });
-    }
-  };
-
-  const handleFulfillRequest = async (transactionId: string) => {
-    if (!session || userRole !== 'farmer') return;
-
-    const { error } = await supabase
-      .from('escrow_transactions')
-      .update({ 
-        farmer_id: session.user.id, 
-        farmer_email: session.user.email,
-        status: 'pending_deposit', // Immediately contract formed, waiting for funding
-        contract_formed_at: new Date().toISOString()
-      })
-      .eq('id', transactionId)
-      // Safety check: ensure it is still listed and unclaimed by a farmer
-      .eq('status', 'listed')
-      .is('farmer_id', null);
-
-    if (!error) {
-      fetchData();
-      setActiveTransactionId(transactionId);
-      setToast({ message: 'Order fulfilled! Waiting for deposit.', type: 'success' });
-    } else {
-      setToast({ message: "Could not fulfill request. It may have been taken.", type: 'error' });
-    }
-  };
-
-  const topUpWallet = async () => {
-    if (!session) return;
-
-    const amount = 5000; // Default top up amount
-    const phoneNumber = prompt('Enter your M-Pesa phone number (e.g. 2547XXXXXXXX):');
-    if (!phoneNumber) return;
-
-    try {
-      const response = await fetch('http://localhost:4000/mpesa/stk-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount,
-          phoneNumber,
-          accountReference: `WALLET_${session.user.id}`,
-          description: 'Mkulima Express wallet top up'
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        throw new Error(data?.error?.errorMessage || 'Failed to initiate M-Pesa payment');
-      }
-
-      setToast({
-        message: 'STK Push sent. Check your phone to approve payment.',
-        type: 'info'
-      });
-    } catch (error: any) {
-      setToast({
-        message: error.message || 'Error starting M-Pesa payment',
-        type: 'error'
-      });
-    }
-  };
-
-  const activeTransaction = useMemo(() => 
-    transactions.find(t => t.id === activeTransactionId), 
-  [transactions, activeTransactionId]);
-
-  if (loading) return <Loading />;
-  if (setupNeeded) return <SetupRequired />;
-  if (!session) return <Auth onLogin={() => {}} />;
-
-  // --- SUB-COMPONENTS FOR MAIN APP ---
-
-  const TransactionDetails = ({ transaction, onClose }: { transaction: Transaction, onClose: () => void }) => {
-    const [msgText, setMsgText] = useState('');
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [view, setView] = useState<'info' | 'chat' | 'logistics'>('info');
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const [qrScannerOpen, setQrScannerOpen] = useState(false);
-    const [pinInput, setPinInput] = useState('');
-
-    useEffect(() => {
-      const fetchMsgs = async () => {
-        const { data } = await supabase
-          .from('messages')
-          .select('*')
-          .eq('transaction_id', transaction.id)
-          .order('created_at', { ascending: true });
-        setMessages(data || []);
+      const calculateAvg = (txs: Transaction[]) => {
+        if (!txs.length) return 0;
+        const totalQty = txs.reduce((sum, t) => sum + Number(t.quantity), 0);
+        const totalAmt = txs.reduce((sum, t) => sum + Number(t.amount), 0);
+        return totalQty > 0 ? totalAmt / totalQty : 0;
       };
-      
-      fetchMsgs();
 
-      const channel = supabase
-        .channel('msgs')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `transaction_id=eq.${transaction.id}` }, (payload) => {
-          setMessages(prev => [...prev, payload.new as Message]);
-        })
-        .subscribe();
-
-      return () => { supabase.removeChannel(channel); };
-    }, [transaction.id]);
-
-    useEffect(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }, [messages, view]);
-
-    const sendMessage = async () => {
-      if (!msgText.trim()) return;
-      await supabase.from('messages').insert({
-        transaction_id: transaction.id,
-        sender_id: session.user.id,
-        sender_email: session.user.email,
-        content: msgText
+      const recentTxs = catTxs.filter(t => new Date(t.created_at) >= sevenDaysAgo);
+      const prevTxs = catTxs.filter(t => {
+        const d = new Date(t.created_at);
+        return d >= fourteenDaysAgo && d < sevenDaysAgo;
       });
-      setMsgText('');
-    };
 
-    const updateStatus = async (newStatus: TransactionStatus, resetVendor = false) => {
-      // Wallet Logic for funding
-      if (newStatus === 'in_escrow' && transaction.status === 'pending_deposit') {
-        if (!wallet || wallet.balance < transaction.amount) {
-          setToast({ message: "Insufficient funds in wallet! Please top up.", type: 'error' });
-          return;
+      const currentAvg = calculateAvg(recentTxs);
+      const prevAvg = calculateAvg(prevTxs);
+
+      return {
+        name: cat,
+        price: currentAvg || prevAvg || 0,
+        change: prevAvg > 0 ? ((currentAvg - prevAvg) / prevAvg) * 100 : 0,
+        hasData: recentTxs.length > 0 || prevTxs.length > 0,
+        isUp: currentAvg >= prevAvg
+      };
+    }).filter(t => t.hasData).sort((a, b) => b.price - a.price);
+  }, [transactions]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreating(true);
+    try {
+      const isVendor = role === 'vendor';
+      const { error } = await supabase.from('escrow_transactions').insert({
+        title: createForm.title,
+        amount: Number(createForm.amount),
+        description: createForm.description,
+        category: createForm.category,
+        quantity: Number(createForm.quantity),
+        vendor_id: isVendor ? session.user.id : null,
+        farmer_id: isVendor ? null : session.user.id,
+        vendor_email: isVendor ? session.user.email : null,
+        farmer_email: isVendor ? null : session.user.email,
+        status: 'listed'
+      });
+
+      if (error) throw error;
+      setCreateForm({ title: '', category: 'Maize', quantity: '', amount: '', description: '' });
+      setActiveTab('dashboard');
+      fetchData(session.user.id);
+    } catch (err: any) {
+      alert("Error creating listing: " + err.message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleClaim = async (txId: string) => {
+    try {
+      const timestamp = new Date().toISOString();
+      const updateData = role === 'vendor' 
+        ? { vendor_id: session.user.id, vendor_email: session.user.email, status: 'offer_made', offer_made_at: timestamp }
+        : { farmer_id: session.user.id, farmer_email: session.user.email, status: 'pending_deposit', contract_formed_at: timestamp };
+
+      const { error } = await supabase.from('escrow_transactions').update(updateData).eq('id', txId);
+      if (error) throw error;
+      fetchData(session.user.id);
+      setActiveTab('dashboard');
+      setActiveTransactionId(txId); // Open details immediately
+    } catch (err: any) {
+      alert("Error claiming listing: " + err.message);
+    }
+  };
+
+  const handleUpdateStatus = async (txId: string, newStatus: string, timestampField: string) => {
+    try {
+      const tx = transactions.find(t => t.id === txId);
+      if (!tx) throw new Error("Transaction not found");
+
+      // Financial Logic
+      if (newStatus === 'in_escrow' && tx.status === 'pending_deposit') {
+        if (!wallet || wallet.balance < tx.amount) {
+          throw new Error("Insufficient funds. Please top up your wallet.");
         }
         // Deduct from Vendor
-        await supabase.from('wallets').update({ balance: wallet.balance - transaction.amount }).eq('user_id', session.user.id);
+        await supabase.from('wallets').update({ balance: wallet.balance - tx.amount }).eq('user_id', session.user.id);
+        await supabase.from('wallet_transactions').insert({
+          user_id: session.user.id,
+          amount: -tx.amount,
+          type: 'escrow_lock',
+          description: `Escrow Lock for ${tx.title}`,
+          reference_id: txId
+        });
       }
 
-      // Wallet Logic for Release
-      if (newStatus === 'completed' && transaction.status === 'delivered') {
-         // Add to Farmer
-         if (transaction.farmer_id) {
-            const { data: farmerWallet } = await supabase.from('wallets').select('balance').eq('user_id', transaction.farmer_id).single();
-            if (farmerWallet) {
-              await supabase.from('wallets').update({ balance: farmerWallet.balance + transaction.amount }).eq('user_id', transaction.farmer_id);
-            }
-         }
-      }
-
-      const updates: any = { status: newStatus };
-      const now = new Date().toISOString();
-
-      if (newStatus === 'pending_deposit') updates.contract_formed_at = now; // Also handles "Accept Offer"
-      if (newStatus === 'in_escrow') updates.deposit_paid_at = now;
-      if (newStatus === 'shipped') updates.shipped_at = now;
-      if (newStatus === 'delivered') updates.delivered_at = now;
-      if (newStatus === 'completed') updates.completed_at = now;
-      if (newStatus === 'disputed') updates.disputed_at = now;
-
-      if (resetVendor) {
-        updates.vendor_id = null;
-        updates.vendor_email = null;
-        if (newStatus === 'listed') {
-           updates.offer_made_at = null; // Reset
+      if (newStatus === 'completed' && tx.status === 'delivered') {
+        // Release to Farmer
+        const { data: farmerWallet } = await supabase.from('wallets').select('*').eq('user_id', tx.farmer_id).single();
+        if (farmerWallet) {
+          await supabase.from('wallets').update({ balance: farmerWallet.balance + tx.amount }).eq('user_id', tx.farmer_id);
+          await supabase.from('wallet_transactions').insert({
+            user_id: tx.farmer_id,
+            amount: tx.amount,
+            type: 'payment_in',
+            description: `Payment Received for ${tx.title}`,
+            reference_id: txId
+          });
         }
       }
 
-      const { error } = await supabase.from('escrow_transactions').update(updates).eq('id', transaction.id);
-      
-      if (!error) {
-        fetchData();
-        fetchWallet(session.user.id);
-        if (newStatus === 'completed' || resetVendor) {
-           setToast({ message: 'Transaction updated successfully', type: 'success' });
-           onClose();
-        }
-      } else {
-        setToast({ message: "Failed to update status", type: 'error' });
-      }
-    };
-
-    const handleQrSuccess = async (decodedText: string) => {
-       setQrScannerOpen(false);
-       if (decodedText === transaction.delivery_pin) {
-         updateStatus('delivered');
-       } else {
-         setToast({ message: "Invalid Delivery QR Code!", type: 'error' });
-       }
-    };
-
-    const manualVerify = () => {
-      if (pinInput === transaction.delivery_pin) {
-        updateStatus('delivered');
-      } else {
-        setToast({ message: "Invalid PIN code", type: 'error' });
-      }
+      const updateData = { 
+        status: newStatus,
+        [timestampField]: new Date().toISOString()
+      };
+      const { error } = await supabase.from('escrow_transactions').update(updateData).eq('id', txId);
+      if (error) throw error;
+      fetchData(session.user.id);
+    } catch (err: any) {
+      alert("Error updating status: " + err.message);
     }
-
-    // Format Timestamp Helper
-    const formatTime = (ts?: string) => {
-      if (!ts) return null;
-      return new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    };
-
-    // Strict Identity Checks for UI Controls
-    const isOwnerFarmer = session.user.id === transaction.farmer_id;
-    const isOwnerVendor = session.user.id === transaction.vendor_id;
-    
-    // Fallback for role-based view (e.g. seeing a listing)
-    const canSeeControls = isOwnerFarmer || isOwnerVendor;
-
-    return (
-      <div className="fixed inset-0 bg-slate-50 z-50 flex flex-col animate-in slide-in-from-bottom-10 duration-200">
-        {/* Header */}
-        <div className="bg-white px-4 py-4 border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
-          <button onClick={onClose} className="p-2 -ml-2 hover:bg-slate-100 rounded-full">
-            <ChevronRight className="w-6 h-6 rotate-180 text-slate-600" />
-          </button>
-          <div className="flex-1">
-            <h2 className="font-bold text-slate-800 text-lg leading-tight">{transaction.title}</h2>
-            <p className="text-xs text-slate-500 font-mono">ID: {transaction.id.slice(0, 8)}</p>
-          </div>
-          <StatusBadge status={transaction.status} />
-        </div>
-
-        {/* Tabs */}
-        <div className="flex bg-white border-b">
-           <button onClick={() => setView('info')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition ${view === 'info' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-400'}`}>Details</button>
-           <button onClick={() => setView('chat')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition ${view === 'chat' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-400'}`}>Chat</button>
-           <button onClick={() => setView('logistics')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition ${view === 'logistics' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-400'}`}>Logistics</button>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto bg-slate-50 p-4">
-           {view === 'info' && (
-             <div className="space-y-6">
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
-                  <div className="flex justify-between items-start mb-4">
-                     <div>
-                       <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Amount</span>
-                       <div className="text-3xl font-mono font-bold text-emerald-700 mt-1">KES {transaction.amount.toLocaleString()}</div>
-                     </div>
-                     {transaction.category && (
-                       <div className="text-right">
-                         <span className="block px-3 py-1 bg-slate-100 rounded-lg text-xs font-bold text-slate-600 mb-1">{transaction.category}</span>
-                         {transaction.quantity ? (
-                           <span className="text-sm text-slate-500 font-medium">{transaction.quantity} kg</span>
-                         ) : null}
-                       </div>
-                     )}
-                  </div>
-                  
-                  {/* Price Analysis */}
-                  {transaction.quantity && transaction.quantity > 0 && (
-                    <div className="bg-emerald-50 p-3 rounded-lg flex items-center justify-between mb-4 border border-emerald-100">
-                       <span className="text-xs text-emerald-800 font-bold">Price per Kg</span>
-                       <span className="text-sm font-mono font-bold text-emerald-800">
-                         ~KES {Math.round(transaction.amount / transaction.quantity).toLocaleString()}/kg
-                       </span>
-                    </div>
-                  )}
-
-                  <div className="pt-4 border-t border-slate-50">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Description</span>
-                    <p className="text-slate-700 leading-relaxed">{transaction.description || 'No description provided.'}</p>
-                  </div>
-                  {/* Identity Badge */}
-                  <div className="mt-4 flex gap-2">
-                     {isOwnerFarmer && <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full font-bold">You are the Farmer</span>}
-                     {isOwnerVendor && <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-1 rounded-full font-bold">You are the Vendor</span>}
-                     {!isOwnerFarmer && !isOwnerVendor && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-full font-bold">Read Only View</span>}
-                  </div>
-                </div>
-
-                {/* Timeline */}
-                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
-                   <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                     <TrendingUp className="w-5 h-5 text-emerald-600" />
-                     Progress
-                   </h3>
-                   <div className="space-y-6 relative pl-2">
-                      <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-slate-100"></div>
-                      {[
-                        { s: 'listed', l: 'Listed on Market', ts: transaction.created_at, done: true },
-                        { s: 'offer_made', l: 'Offer Received', ts: transaction.offer_made_at, done: transaction.status !== 'listed' },
-                        { s: 'pending_deposit', l: 'Contract Formed', ts: transaction.contract_formed_at, done: ['pending_deposit', 'in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
-                        { s: 'in_escrow', l: 'Funds Secured', ts: transaction.deposit_paid_at, done: ['in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
-                        { s: 'shipped', l: 'Goods Shipped', ts: transaction.shipped_at, done: ['shipped', 'delivered', 'completed'].includes(transaction.status) },
-                        { s: 'delivered', l: 'Delivered', ts: transaction.delivered_at, done: ['delivered', 'completed'].includes(transaction.status) },
-                        { s: 'completed', l: 'Funds Released', ts: transaction.completed_at, done: transaction.status === 'completed' }
-                      ].map((step, idx) => (
-                        <div key={idx} className="relative flex items-start gap-3">
-                           <div className={`mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center relative z-10 bg-white ${step.done ? 'border-emerald-500 text-emerald-500' : 'border-slate-200 text-slate-300'}`}>
-                             {step.done ? <CheckCircle className="w-4 h-4" /> : <div className="w-2 h-2 rounded-full bg-slate-200"></div>}
-                           </div>
-                           <div className="flex-1">
-                             <span className={`text-sm font-medium block ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>{step.l}</span>
-                             {step.ts && step.done && (
-                               <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
-                                 <Clock className="w-3 h-3" />
-                                 {formatTime(step.ts)}
-                               </span>
-                             )}
-                           </div>
-                        </div>
-                      ))}
-                   </div>
-                </div>
-
-                {/* Actions - Strictly Controlled by Identity */}
-                {canSeeControls && (
-                  <div className="pb-8">
-                     {/* Farmer: Accept or Reject Offer */}
-                     {isOwnerFarmer && transaction.status === 'offer_made' && (
-                       <div className="space-y-3">
-                         <div className="bg-purple-50 p-4 rounded-xl border border-purple-200 mb-2">
-                           <p className="text-sm text-purple-800 font-medium text-center">
-                             A Vendor wants to buy this for <span className="font-bold">KES {transaction.amount.toLocaleString()}</span>.
-                           </p>
-                         </div>
-                         <button onClick={() => updateStatus('pending_deposit')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
-                           <Handshake className="w-5 h-5" /> Accept Offer
-                         </button>
-                         <button onClick={() => updateStatus('listed', true)} className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-xl font-bold hover:bg-slate-50 active:scale-95 transition flex items-center justify-center gap-2">
-                           <X className="w-5 h-5" /> Reject Offer
-                         </button>
-                       </div>
-                     )}
-
-                     {isOwnerVendor && transaction.status === 'offer_made' && (
-                       <div className="bg-amber-50 p-4 rounded-xl text-amber-800 text-sm font-medium text-center border border-amber-200">
-                         Waiting for Farmer to accept your offer.
-                       </div>
-                     )}
-
-                     {isOwnerVendor && transaction.status === 'pending_deposit' && (
-                       <button onClick={() => updateStatus('in_escrow')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
-                         <Lock className="w-5 h-5" /> Deposit Funds (Escrow)
-                       </button>
-                     )}
-                     
-                     {/* Farmer Waiting for Deposit */}
-                     {isOwnerFarmer && transaction.status === 'pending_deposit' && (
-                        <div className="bg-blue-50 p-4 rounded-xl text-blue-800 text-sm font-medium text-center border border-blue-200">
-                           Waiting for Vendor to deposit funds.
-                        </div>
-                     )}
-
-                     {isOwnerFarmer && transaction.status === 'in_escrow' && (
-                       <button onClick={() => updateStatus('shipped')} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition flex items-center justify-center gap-2">
-                         <Truck className="w-5 h-5" /> Mark as Shipped
-                       </button>
-                     )}
-                     {isOwnerVendor && transaction.status === 'delivered' && (
-                       <button onClick={() => updateStatus('completed')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
-                         <CheckCircle className="w-5 h-5" /> Release Payment
-                       </button>
-                     )}
-                     {transaction.status !== 'completed' && transaction.status !== 'disputed' && transaction.status !== 'listed' && (
-                       <button onClick={() => updateStatus('disputed')} className="mt-4 w-full bg-white text-red-600 border border-red-100 py-3 rounded-xl font-semibold hover:bg-red-50 transition flex items-center justify-center gap-2">
-                         <Gavel className="w-4 h-4" /> Raise Dispute
-                       </button>
-                     )}
-                  </div>
-                )}
-             </div>
-           )}
-
-           {view === 'chat' && (
-             <div className="flex flex-col h-full">
-               <div className="flex-1 space-y-4 mb-4" ref={scrollRef}>
-                  {messages.length === 0 && <div className="text-center text-slate-400 mt-10 text-sm">No messages yet. Start discussing!</div>}
-                  {messages.map(m => {
-                    const isMe = m.sender_id === session.user.id;
-                    return (
-                      <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${isMe ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}`}>
-                          {m.content}
-                        </div>
-                      </div>
-                    )
-                  })}
-               </div>
-               <div className="flex items-center gap-2 bg-white p-2 rounded-full border border-slate-200 shadow-sm">
-                 <input 
-                   className="flex-1 bg-transparent px-4 py-2 outline-none text-sm" 
-                   placeholder="Type a message..." 
-                   value={msgText}
-                   onChange={e => setMsgText(e.target.value)}
-                 />
-                 <button onClick={sendMessage} className="p-2 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition">
-                   <Send className="w-5 h-5" />
-                 </button>
-               </div>
-             </div>
-           )}
-
-           {view === 'logistics' && (
-             <div className="space-y-6">
-               <div className="bg-white p-6 rounded-xl shadow-sm text-center border border-slate-100">
-                  <h3 className="font-bold text-slate-800 mb-2">Delivery Verification</h3>
-                  <p className="text-slate-500 text-sm mb-6">Use this QR code to securely verify delivery.</p>
-                  
-                  {isOwnerFarmer ? (
-                     transaction.status === 'shipped' || transaction.status === 'delivered' ? (
-                       <div className="flex flex-col items-center">
-                         <div className="bg-white p-4 rounded-xl border-2 border-slate-900 mb-4">
-                           <QRCode value={transaction.delivery_pin || 'error'} size={180} />
-                         </div>
-                         <p className="text-xs font-mono text-slate-400">PIN: {transaction.delivery_pin}</p>
-                         <p className="text-sm font-medium text-emerald-700 mt-4 bg-emerald-50 px-4 py-2 rounded-lg">Show this to Vendor upon delivery</p>
-                       </div>
-                     ) : (
-                       <div className="p-8 bg-slate-50 rounded-xl border border-dashed border-slate-300">
-                         <Truck className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                         <p className="text-sm text-slate-400">QR Code generates when marked as shipped.</p>
-                       </div>
-                     )
-                  ) : isOwnerVendor ? (
-                     // Vendor View
-                     <div className="flex flex-col items-center">
-                        {qrScannerOpen ? (
-                          <div className="w-full rounded-xl overflow-hidden mb-4 relative bg-black h-64">
-                             {/* Mock Scanner UI since html5-qrcode needs real DOM element mounting which is tricky in this inline setup, we use simple fallback for demo */}
-                             <div className="absolute inset-0 flex items-center justify-center text-white text-xs">
-                               <p>Camera would open here in prod.</p>
-                             </div>
-                             {/* In a real implementation, <div id="reader"></div> would go here with useEffect hook to Html5QrcodeScanner */}
-                          </div>
-                        ) : (
-                          <button onClick={() => setQrScannerOpen(true)} className="mb-6 p-6 bg-slate-50 rounded-full border-2 border-emerald-100 hover:border-emerald-500 hover:bg-emerald-50 transition group">
-                            <ScanLine className="w-12 h-12 text-emerald-300 group-hover:text-emerald-600 transition" />
-                          </button>
-                        )}
-                        
-                        <div className="w-full">
-                           <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Or Enter PIN</label>
-                           <div className="flex gap-2">
-                             <input 
-                               value={pinInput}
-                               onChange={(e) => setPinInput(e.target.value)}
-                               placeholder="e.g. A7X29"
-                               className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-center font-mono tracking-widest uppercase outline-none focus:ring-2 focus:ring-emerald-500"
-                             />
-                             <button onClick={manualVerify} className="px-6 bg-slate-800 text-white rounded-xl font-bold">Verify</button>
-                           </div>
-                        </div>
-                     </div>
-                  ) : (
-                    <div className="text-slate-400 italic text-sm">
-                      Only the involved parties can access logistics.
-                    </div>
-                  )}
-               </div>
-             </div>
-           )}
-        </div>
-      </div>
-    );
   };
 
-  return (
-    <div className="max-w-md mx-auto min-h-screen bg-slate-50 shadow-2xl overflow-hidden relative pb-20">
-      
-      {/* Global Toast Container */}
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+  const handleTopUp = async (amount: number) => {
+    // Simulating M-Pesa
+    const newBalance = (wallet?.balance || 0) + amount;
+    await supabase.from('wallets').update({ balance: newBalance }).eq('user_id', session.user.id);
+    await supabase.from('wallet_transactions').insert({
+      user_id: session.user.id,
+      amount: amount,
+      type: 'deposit',
+      description: 'M-Pesa Top Up'
+    });
+    fetchData(session.user.id);
+  };
 
+  const handleWithdraw = async (amount: number, phone: string) => {
+    if ((wallet?.balance || 0) < amount) throw new Error("Insufficient balance");
+    const newBalance = wallet.balance - amount;
+    await supabase.from('wallets').update({ balance: newBalance }).eq('user_id', session.user.id);
+    await supabase.from('wallet_transactions').insert({
+      user_id: session.user.id,
+      amount: -amount,
+      type: 'withdrawal',
+      description: `Withdrawal to ${phone}`
+    });
+    fetchData(session.user.id);
+  };
+
+  if (!session) return <AuthScreen onLogin={() => {}} />;
+  if (showSetup) return <SetupRequired />;
+
+  return (
+    <div className="max-w-md mx-auto min-h-screen bg-slate-50/50 shadow-2xl overflow-hidden relative pb-24">
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-md sticky top-0 z-30 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+      <div className="bg-white/80 backdrop-blur-md sticky top-0 z-30 px-5 py-4 border-b border-slate-200/60 flex justify-between items-center shadow-sm">
         <div className="flex items-center gap-3">
-          <div className="bg-emerald-100 p-2 rounded-lg">
-            <Sprout className="w-5 h-5 text-emerald-700" />
-          </div>
+          <div className="bg-emerald-600 p-2 rounded-xl shadow-md shadow-emerald-600/20"><Leaf className="w-5 h-5 text-white" /></div>
           <div>
-            <h1 className="font-extrabold text-emerald-950 text-lg leading-none">Mkulima Express</h1>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{userRole}</p>
+            <h1 className="font-extrabold text-slate-800 text-lg leading-none tracking-tight">Mkulima Express</h1>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{role}</p>
+            </div>
           </div>
         </div>
-        <button onClick={() => supabase.auth.signOut()} className="p-2 text-slate-400 hover:text-red-500 transition bg-slate-50 rounded-full">
-          <LogOut className="w-5 h-5" />
-        </button>
+        <div className="flex gap-2">
+          <button className="p-2.5 text-slate-400 hover:text-slate-600 transition bg-slate-100/50 rounded-full hover:bg-slate-100">
+            <Bell className="w-5 h-5" />
+          </button>
+          <button onClick={() => supabase.auth.signOut()} className="p-2.5 text-slate-400 hover:text-red-500 transition bg-slate-100/50 rounded-full hover:bg-red-50">
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
-      {/* Main Content Areas */}
-      <div className="p-4 space-y-4">
-        
+      <div className="p-5 space-y-6">
         {/* Dashboard View */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-4 animate-in fade-in duration-500">
+          <div className="space-y-6 animate-in fade-in duration-500">
              {/* Stats Card */}
-             <div className="bg-gradient-to-br from-emerald-800 to-emerald-600 rounded-2xl p-6 text-white shadow-xl shadow-emerald-700/20 relative overflow-hidden">
-                <div className="absolute -right-4 -bottom-4 bg-white/10 w-32 h-32 rounded-full blur-2xl"></div>
+             <div className="bg-gradient-to-br from-emerald-900 to-emerald-700 rounded-3xl p-6 text-white shadow-xl shadow-emerald-900/20 relative overflow-hidden group">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500 rounded-full mix-blend-overlay filter blur-3xl opacity-20 -translate-y-1/2 translate-x-1/2 group-hover:opacity-30 transition duration-700"></div>
+                <div className="absolute bottom-0 left-0 w-64 h-64 bg-blue-500 rounded-full mix-blend-overlay filter blur-3xl opacity-20 translate-y-1/2 -translate-x-1/2 group-hover:opacity-30 transition duration-700"></div>
+                
+                {/* Pattern overlay */}
+                <div className="absolute inset-0 opacity-10 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiNmZmYiLz48L3N2Zz4=')]"></div>
+
                 <div className="relative z-10">
-                  <div className="flex items-center gap-2 text-emerald-200 mb-1 text-sm font-medium">
-                    <Wallet className="w-4 h-4" /> Wallet Balance
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-2 text-emerald-200 text-xs font-bold uppercase tracking-wider">
+                      <Wallet className="w-4 h-4" /> Wallet Balance
+                    </div>
+                    <div className="px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold text-white/80 backdrop-blur-sm">KES Account</div>
                   </div>
-                  <div className="text-3xl font-mono font-bold tracking-tight">KES {wallet?.balance.toLocaleString() ?? '...'}</div>
-                  <div className="mt-4 flex gap-2">
-                    <button onClick={() => setActiveTab('wallet')} className="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-xs font-bold backdrop-blur-sm transition">
-                      Top Up
+                  <div className="text-4xl font-mono font-bold tracking-tighter text-white mb-6">KES {wallet?.balance.toLocaleString() ?? '...'}</div>
+                  <div className="flex gap-3">
+                    <button onClick={() => setActiveTab('wallet')} className="flex-1 bg-white text-emerald-900 px-4 py-3 rounded-xl text-sm font-bold shadow-lg shadow-black/10 hover:bg-emerald-50 transition active:scale-[0.98] flex items-center justify-center gap-2">
+                      <Plus className="w-4 h-4" /> Top Up
                     </button>
-                    <button className="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-xs font-bold backdrop-blur-sm transition">
-                      Withdraw
+                    <button onClick={() => setActiveTab('wallet')} className="flex-1 bg-emerald-800/50 border border-emerald-500/30 text-white px-4 py-3 rounded-xl text-sm font-bold backdrop-blur-md hover:bg-emerald-800/70 transition active:scale-[0.98]">
+                      View
                     </button>
                   </div>
                 </div>
@@ -1292,261 +1012,334 @@ const App = () => {
 
              {/* Recent Activity */}
              <div>
-               <div className="flex justify-between items-center mb-3 px-1">
-                 <h2 className="font-bold text-slate-800">Your Activity</h2>
-                 <span className="text-xs text-emerald-600 font-semibold cursor-pointer">View All</span>
-               </div>
-               
-               {/* Dashboard Filter: Only show items relevant to the current user */}
-               {transactions.filter(t => t.farmer_id === session.user.id || t.vendor_id === session.user.id).length === 0 ? (
-                 <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-300">
-                   <Leaf className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                   <p className="text-slate-500 text-sm">No transactions yet.</p>
-                   <button onClick={() => setActiveTab('create')} className="mt-3 text-emerald-700 font-bold text-sm hover:underline">Start New</button>
-                 </div>
-               ) : (
-                 <div className="space-y-3">
-                   {transactions
-                    .filter(t => t.farmer_id === session.user.id || t.vendor_id === session.user.id)
-                    .map(t => (
-                     <div key={t.id} onClick={() => setActiveTransactionId(t.id)} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center gap-4 hover:shadow-md transition cursor-pointer active:scale-[0.99]">
-                       <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${t.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                         {t.status === 'completed' ? <CheckCircle className="w-6 h-6" /> : <CreditCard className="w-6 h-6" />}
-                       </div>
-                       <div className="flex-1 min-w-0">
-                         <div className="flex justify-between items-start mb-1">
-                            <h3 className="font-bold text-slate-800 truncate pr-2">{t.title}</h3>
-                            <span className="text-emerald-700 font-mono font-bold text-sm whitespace-nowrap">KES {t.amount.toLocaleString()}</span>
-                         </div>
-                         <div className="flex justify-between items-center">
-                            <p className="text-xs text-slate-400 truncate max-w-[120px]">{t.created_at.slice(0, 10)}</p>
-                            <StatusBadge status={t.status} />
-                         </div>
-                       </div>
-                     </div>
-                   ))}
-                 </div>
-               )}
-             </div>
-          </div>
-        )}
-
-        {/* Marketplace View */}
-        {activeTab === 'market' && (
-          <div className="animate-in fade-in duration-500 space-y-4">
-             {/* Market Insights */}
-             <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
-                <div className="flex justify-between items-center mb-3">
-                  <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Market Trends (Avg Price/kg)</h3>
-                  <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-1 rounded-full font-medium">Rolling 7-Day</span>
-                </div>
-                <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-                   {marketTrends.length === 0 ? (
-                     <div className="text-xs text-slate-400 w-full text-center italic py-2">
-                       No sales data yet. Start listing produce to see trends!
-                     </div>
-                   ) : (
-                     marketTrends.map((item, i) => (
-                       <div key={i} className="min-w-[100px] p-3 rounded-lg bg-slate-50 border border-slate-200 flex flex-col items-center">
-                          <span className="text-xs text-slate-500 font-medium mb-1">{item.name}</span>
-                          <span className="text-lg font-bold text-slate-800 font-mono">KES {item.price}</span>
-                          <div className={`text-[10px] flex items-center gap-1 font-semibold ${item.up ? 'text-emerald-600' : 'text-red-500'}`}>
-                            {item.up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                            {item.up ? 'Up' : 'Down'}
-                          </div>
-                       </div>
-                     ))
-                   )}
-                </div>
-             </div>
-
-             <div className="grid grid-cols-2 gap-3">
-                {/* 
-                  Marketplace Logic:
-                  Shows both Farmer Listings (Selling) and Vendor Requests (Buying).
-                */}
-                {transactions.filter(t => t.status === 'listed').map(t => {
-                  const isVendorRequest = !t.farmer_id && t.vendor_id; // Created by Vendor, needs Farmer
-                  const isFarmerListing = !t.vendor_id && t.farmer_id; // Created by Farmer, needs Vendor
-
-                  return (
-                    <div key={t.id} onClick={() => setActiveTransactionId(t.id)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-emerald-500 transition cursor-pointer group flex flex-col h-full">
-                       <div className={`h-24 rounded-lg mb-3 flex items-center justify-center transition relative overflow-hidden ${isVendorRequest ? 'bg-amber-50 group-hover:bg-amber-100' : 'bg-emerald-50 group-hover:bg-emerald-100'}`}>
-                          {isVendorRequest ? (
-                             <Megaphone className="w-8 h-8 text-amber-400 group-hover:text-amber-500" />
-                          ) : (
-                             <ShoppingBag className="w-8 h-8 text-emerald-400 group-hover:text-emerald-500" />
-                          )}
-                          <div className={`absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded ${isVendorRequest ? 'bg-amber-200 text-amber-800' : 'bg-emerald-200 text-emerald-800'}`}>
-                            {isVendorRequest ? 'WANTED' : 'FOR SALE'}
-                          </div>
-                       </div>
-                       <h4 className="font-bold text-slate-800 text-sm truncate">{t.title}</h4>
-                       <div className="flex justify-between items-end mt-1">
-                         <p className="text-emerald-700 font-mono font-bold text-sm">KES {t.amount.toLocaleString()}</p>
-                         {t.quantity && t.quantity > 0 && (
-                           <p className="text-[10px] text-slate-400 font-mono">@{Math.round(t.amount/t.quantity)}/kg</p>
-                         )}
-                       </div>
-                       {t.quantity ? <p className="text-slate-400 text-xs mt-0.5">{t.quantity} kg</p> : null}
-                       
-                       <div className="mt-auto pt-3">
-                        {/* Vendor View */}
-                        {userRole === 'vendor' && isFarmerListing && (
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleMakeOffer(t.id);
-                            }}
-                            className="w-full bg-slate-900 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-600 transition"
-                          >
-                            Make Offer
-                          </button>
-                        )}
-                        {userRole === 'vendor' && isVendorRequest && t.vendor_id === session.user.id && (
-                          <div className="w-full text-center text-[10px] text-amber-700 font-bold bg-amber-50 py-1 rounded">
-                             Your Request
-                          </div>
-                        )}
-
-                        {/* Farmer View */}
-                        {userRole === 'farmer' && isVendorRequest && (
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleFulfillRequest(t.id);
-                            }}
-                            className="w-full bg-emerald-600 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-700 transition shadow-lg shadow-emerald-200"
-                          >
-                            Fulfill Order
-                          </button>
-                        )}
-                        {userRole === 'farmer' && isFarmerListing && t.farmer_id === session.user.id && (
-                           <div className="w-full text-center text-[10px] text-emerald-600 font-bold bg-emerald-50 py-1 rounded">
-                              Your Listing
-                           </div>
-                        )}
-                       </div>
-                    </div>
-                  );
-                })}
-                
-                {transactions.filter(t => t.status === 'listed').length === 0 && (
-                   <div className="col-span-2 text-center py-10 text-slate-400 text-sm flex flex-col items-center gap-3">
-                      <p>No listings available right now.</p>
+               <div className="flex justify-between items-end mb-4 px-1">
+                 <h2 className="font-bold text-slate-800 text-lg">Your Activity</h2>
+                 
+                 {/* Filter Chips */}
+                 <div className="flex bg-slate-200/50 p-1 rounded-xl">
+                    {['all', 'active', 'completed'].map(f => (
                       <button 
-                        onClick={() => setSetupNeeded(true)}
-                        className="text-xs text-emerald-600 underline"
+                        key={f}
+                        onClick={() => setDashboardFilter(f as any)}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold capitalize transition-all ${
+                          dashboardFilter === f 
+                            ? 'bg-white text-slate-800 shadow-sm' 
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
                       >
-                        Don't see items? Check Database Rules
+                        {f}
                       </button>
+                    ))}
+                 </div>
+               </div>
+
+               {/* Filter Logic & List */}
+               {(() => {
+                 const myTxs = transactions.filter(t => t.farmer_id === session.user.id || t.vendor_id === session.user.id);
+                 const filteredTxs = myTxs.filter(t => {
+                    if (dashboardFilter === 'all') return true;
+                    if (dashboardFilter === 'completed') return t.status === 'completed';
+                    if (dashboardFilter === 'active') return !['completed', 'disputed'].includes(t.status);
+                    return true;
+                 });
+
+                 if (filteredTxs.length === 0) {
+                   return (
+                     <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200">
+                       <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                         <Leaf className="w-8 h-8 text-slate-300" />
+                       </div>
+                       <p className="text-slate-500 text-sm font-medium">No {dashboardFilter === 'all' ? '' : dashboardFilter} transactions found.</p>
+                       <button onClick={() => setActiveTab('create')} className="mt-4 px-5 py-2 bg-emerald-50 text-emerald-700 font-bold text-xs rounded-full hover:bg-emerald-100 transition">
+                         Start New Transaction
+                       </button>
+                     </div>
+                   );
+                 }
+
+                 return (
+                   <div className="space-y-3">
+                     {filteredTxs.map(t => (
+                       <div key={t.id} onClick={() => setActiveTransactionId(t.id)} className="group bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.99] relative overflow-hidden">
+                         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${
+                           t.status === 'completed' ? 'bg-emerald-500' : 
+                           t.status === 'disputed' ? 'bg-red-500' :
+                           'bg-amber-500'
+                         }`}></div>
+                         <div className="flex items-center gap-4 pl-2">
+                           <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-inner ${t.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                             {t.status === 'completed' ? <CheckCircle className="w-6 h-6" /> : <CreditCard className="w-6 h-6" />}
+                           </div>
+                           <div className="flex-1 min-w-0">
+                             <div className="flex justify-between items-start mb-1">
+                                <h3 className="font-bold text-slate-800 truncate pr-2 group-hover:text-emerald-700 transition-colors">{t.title}</h3>
+                                <span className="text-emerald-700 font-mono font-bold text-sm whitespace-nowrap">KES {t.amount.toLocaleString()}</span>
+                             </div>
+                             <div className="flex justify-between items-center">
+                                <p className="text-xs text-slate-400 truncate max-w-[120px] font-medium">{t.created_at.slice(0, 10)}</p>
+                                <StatusBadge status={t.status} />
+                             </div>
+                           </div>
+                           <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-emerald-500 transition-colors" />
+                         </div>
+                       </div>
+                     ))}
                    </div>
-                )}
+                 );
+               })()}
              </div>
           </div>
         )}
 
-        {/* Create / Wallet View */}
+        {/* Market View */}
+        {activeTab === 'market' && (
+          <div className="space-y-8 animate-in fade-in duration-500">
+            {/* Market Trends Section */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="bg-slate-900 p-1.5 rounded-lg">
+                  <TrendingUp className="w-4 h-4 text-white" />
+                </div>
+                <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Rolling 7-Day Trends</h2>
+              </div>
+              
+              {marketTrends.length > 0 ? (
+                <div className="flex gap-4 overflow-x-auto no-scrollbar pb-4 snap-x">
+                  {marketTrends.map((item) => (
+                    <div key={item.name} className="min-w-[160px] bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col snap-start hover:shadow-md transition-shadow relative overflow-hidden">
+                      <div className={`absolute top-0 right-0 w-16 h-16 rounded-bl-full opacity-10 ${item.isUp ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                      <span className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">{item.name}</span>
+                      <div className="flex items-baseline gap-1 mt-auto">
+                        <span className="text-2xl font-extrabold text-slate-800 tracking-tight">KES {item.price.toFixed(0)}</span>
+                        <span className="text-[10px] text-slate-400 font-medium">/kg</span>
+                      </div>
+                      <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-bold ${item.isUp ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-red-600 bg-red-50 border-red-100'} w-fit px-2.5 py-1 rounded-lg border`}>
+                        {item.isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                        {Math.abs(item.change).toFixed(1)}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-white p-6 rounded-2xl border border-slate-100 text-center shadow-sm">
+                  <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Scale className="w-6 h-6 text-slate-300" />
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium">Not enough data to calculate market trends yet.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Active Listings */}
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="bg-slate-900 p-1.5 rounded-lg">
+                  <Package className="w-4 h-4 text-white" />
+                </div>
+                <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Recent Listings</h2>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4">
+                {transactions.filter(t => t.status === 'listed').length === 0 ? (
+                  <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200">
+                    <p className="text-slate-500 text-sm font-medium">No listings available right now.</p>
+                  </div>
+                ) : (
+                  transactions.filter(t => t.status === 'listed').map(t => (
+                    <div key={t.id} onClick={() => handleClaim(t.id)} className="bg-white p-0 rounded-2xl border border-slate-100 shadow-sm hover:border-emerald-500 transition-all group overflow-hidden cursor-pointer relative">
+                      <div className="p-5 flex justify-between items-start">
+                        <div className="flex-1 min-w-0 pr-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider">
+                              {t.category || 'Produce'}
+                            </span>
+                            {t.quantity && t.quantity > 0 && (
+                              <span className="flex items-center gap-1 text-[10px] text-slate-500 font-bold bg-slate-50 px-2 py-1 rounded-md">
+                                <Scale className="w-3 h-3" /> {t.quantity}kg
+                              </span>
+                            )}
+                          </div>
+                          <h3 className="font-bold text-slate-800 text-lg leading-tight mb-1">{t.title}</h3>
+                          <p className="text-xs text-slate-500 line-clamp-1">{t.description || "No description"}</p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-mono font-bold text-emerald-700 text-xl tracking-tight">KES {t.amount.toLocaleString()}</div>
+                          <div className="text-[10px] text-slate-400 mt-1 font-medium text-right">
+                            {t.quantity ? `~ ${(t.amount/t.quantity).toFixed(0)}/kg` : 'Flat Rate'}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* Footer Action Strip */}
+                      <div className={`px-5 py-3 flex justify-between items-center ${
+                        (role === 'vendor' && t.farmer_id) ? 'bg-emerald-50' :
+                        (role === 'farmer' && t.vendor_id) ? 'bg-amber-50' :
+                        'bg-slate-50'
+                      }`}>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${t.farmer_id ? 'bg-emerald-500' : 'bg-amber-500'}`}></div>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                            {t.farmer_id ? 'Farmer Selling' : 'Vendor Buying'}
+                          </span>
+                        </div>
+                        <span className={`text-xs font-bold flex items-center gap-1 transition-colors ${
+                           (role === 'vendor' && t.farmer_id) ? 'text-emerald-700 group-hover:translate-x-1' :
+                           (role === 'farmer' && t.vendor_id) ? 'text-amber-700 group-hover:translate-x-1' :
+                           'text-slate-400'
+                        }`}>
+                          {(role === 'vendor' && t.farmer_id) ? 'Make Offer' : (role === 'farmer' && t.vendor_id) ? 'Fulfill Request' : 'View Details'} 
+                          <ChevronRight className="w-4 h-4" />
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Create View */}
         {activeTab === 'create' && (
           <div className="animate-in slide-in-from-bottom-5 duration-300">
-             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                <h2 className="text-xl font-bold text-slate-800 mb-6">{userRole === 'farmer' ? 'List Produce (Sell)' : 'Create Request (Buy)'}</h2>
-                <form onSubmit={createTransaction} className="space-y-5">
-                   <div>
-                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Category</label>
-                     <select 
-                       className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition"
-                       value={newCategory}
-                       onChange={e => setNewCategory(e.target.value)}
-                     >
-                        {CATEGORIES.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                     </select>
-                   </div>
-                   <div>
-                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Title / Item Name</label>
-                     <input className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none" placeholder="e.g., 500kg Yellow Corn" value={newTitle} onChange={e => setNewTitle(e.target.value)} required />
-                   </div>
-                   <div className="grid grid-cols-2 gap-4">
-                     <div>
-                       <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Quantity (kg)</label>
-                       <input className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono" type="number" placeholder="100" value={newQuantity} onChange={e => setNewQuantity(e.target.value)} required />
-                     </div>
-                     <div>
-                       <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Total Amount (KES)</label>
-                       <input className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono" type="number" placeholder="50000" value={newAmount} onChange={e => setNewAmount(e.target.value)} required />
-                     </div>
-                   </div>
-                   
-                   {/* Price per Kg helper */}
-                   {newAmount && newQuantity && (
-                     <div className="bg-emerald-50 p-3 rounded-lg flex items-center justify-between">
-                       <span className="text-xs font-bold text-emerald-800">Est. Price/kg</span>
-                       <span className="text-sm font-mono font-bold text-emerald-700">
-                         KES {Math.round(parseFloat(newAmount) / parseFloat(newQuantity)).toLocaleString()}
-                       </span>
-                     </div>
-                   )}
+            <div className="bg-white p-6 rounded-3xl shadow-lg shadow-slate-200/50 border border-slate-100">
+              <h2 className="text-xl font-extrabold text-slate-800 mb-6 flex items-center gap-3 pb-4 border-b border-slate-50">
+                <div className="bg-emerald-100 p-2 rounded-xl text-emerald-700">
+                  <Plus className="w-6 h-6" />
+                </div>
+                {role === 'farmer' ? 'List Produce (Sell)' : 'Create Request (Buy)'}
+              </h2>
+              <form onSubmit={handleCreate} className="space-y-5">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Category</label>
+                  <div className="relative">
+                    <select 
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition appearance-none font-medium text-slate-700"
+                      value={createForm.category}
+                      onChange={e => setCreateForm({...createForm, category: e.target.value})}
+                    >
+                      {['Maize', 'Beans', 'Potatoes', 'Tomatoes', 'Onions', 'Rice', 'Bananas', 'Other'].map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    <ChevronRight className="w-5 h-5 text-slate-400 absolute right-4 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none" />
+                  </div>
+                </div>
 
-                   <div>
-                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Description / Terms</label>
-                     <textarea className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none" placeholder="Delivery details, quality specifications..." value={newDesc} onChange={e => setNewDesc(e.target.value)} />
-                   </div>
-                   <button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition">
-                     {userRole === 'farmer' ? 'Post Listing to Market' : 'Post Request to Market'}
-                   </button>
-                   <p className="text-xs text-slate-400 text-center">
-                     This will appear in the Marketplace for {userRole === 'farmer' ? 'Vendors' : 'Farmers'} to see.
-                   </p>
-                </form>
-             </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Title</label>
+                  <input 
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium placeholder:font-normal"
+                    placeholder="e.g., 5 Bags of Yellow Beans"
+                    value={createForm.title}
+                    onChange={e => setCreateForm({...createForm, title: e.target.value})}
+                    required
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Quantity (kg)</label>
+                    <input 
+                      type="number"
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono font-medium"
+                      placeholder="100"
+                      value={createForm.quantity}
+                      onChange={e => setCreateForm({...createForm, quantity: e.target.value})}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Total Amount (KES)</label>
+                    <input 
+                      type="number"
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono font-medium"
+                      placeholder="5000"
+                      value={createForm.amount}
+                      onChange={e => setCreateForm({...createForm, amount: e.target.value})}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Description</label>
+                  <textarea 
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none h-32 resize-none transition font-medium placeholder:font-normal"
+                    placeholder="Describe quality, packaging, pickup location..."
+                    value={createForm.description}
+                    onChange={e => setCreateForm({...createForm, description: e.target.value})}
+                  />
+                </div>
+
+                <div className="pt-2">
+                  <div className="bg-emerald-50 text-emerald-800 p-4 rounded-xl text-xs mb-4 flex items-start gap-3 border border-emerald-100">
+                    <TrendingUp className="w-5 h-5 shrink-0 mt-0.5 text-emerald-600" />
+                    <div>
+                      <p className="font-bold mb-1">Market Insight</p>
+                      <p className="opacity-90">Calculated Price: <strong>KES {(Number(createForm.amount) / Number(createForm.quantity || 1)).toFixed(2)} / kg</strong>. This will affect rolling average trends.</p>
+                    </div>
+                  </div>
+                  <button 
+                    disabled={creating}
+                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-emerald-700/30 active:scale-[0.98] transition flex justify-center items-center gap-2"
+                  >
+                    {creating ? <Loader2 className="animate-spin w-5 h-5" /> : (
+                      <>
+                        <Plus className="w-5 h-5" />
+                        {role === 'farmer' ? "List on Market" : "Post Request"}
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 
         {activeTab === 'wallet' && (
-           <div className="space-y-4 animate-in fade-in">
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 text-center">
-                 <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Wallet className="w-8 h-8 text-emerald-600" />
-                 </div>
-                 <h2 className="text-3xl font-mono font-bold text-slate-800">KES {wallet?.balance.toLocaleString()}</h2>
-                 <p className="text-slate-400 text-sm mb-6">Available Balance</p>
-                 <button onClick={topUpWallet} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition">
-                   Simulate Bank Deposit (+5,000)
-                 </button>
-              </div>
-           </div>
+          <WalletView 
+            wallet={wallet} 
+            transactions={walletTransactions}
+            onTopUp={handleTopUp}
+            onWithdraw={handleWithdraw}
+          />
         )}
-
       </div>
 
-      {/* Transaction Overlay */}
-      {activeTransaction && (
-         <TransactionDetails transaction={activeTransaction} onClose={() => setActiveTransactionId(null)} />
-      )}
-
-      {/* Navigation */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-slate-200 p-2 pb-6 max-w-md mx-auto flex justify-around items-center z-40">
-        <button onClick={() => setActiveTab('dashboard')} className={`p-3 rounded-2xl transition duration-300 flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-400 hover:bg-slate-50'}`}>
-          <List className="w-6 h-6" />
-          <span className="text-[10px] font-bold">Home</span>
+      {/* Bottom Nav */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200/60 p-2 pb-6 max-w-md mx-auto flex justify-around items-center z-40 rounded-t-3xl shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)]">
+        <button onClick={() => setActiveTab('dashboard')} className={`p-3 rounded-2xl transition-all duration-300 flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}>
+          <Home className={`w-6 h-6 transition-transform ${activeTab === 'dashboard' ? '-translate-y-1' : ''}`} strokeWidth={activeTab === 'dashboard' ? 2.5 : 2} /> 
+          <span className={`text-[10px] font-bold transition-opacity ${activeTab === 'dashboard' ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>Home</span>
         </button>
-        <button onClick={() => setActiveTab('market')} className={`p-3 rounded-2xl transition duration-300 flex flex-col items-center gap-1 ${activeTab === 'market' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-400 hover:bg-slate-50'}`}>
-          <Store className="w-6 h-6" />
-          <span className="text-[10px] font-bold">Market</span>
+        <button onClick={() => setActiveTab('market')} className={`p-3 rounded-2xl transition-all duration-300 flex flex-col items-center gap-1 ${activeTab === 'market' ? 'text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}>
+          <Store className={`w-6 h-6 transition-transform ${activeTab === 'market' ? '-translate-y-1' : ''}`} strokeWidth={activeTab === 'market' ? 2.5 : 2} /> 
+          <span className={`text-[10px] font-bold transition-opacity ${activeTab === 'market' ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>Market</span>
         </button>
-        <button onClick={() => setActiveTab('create')} className="p-4 bg-emerald-600 text-white rounded-full shadow-lg shadow-emerald-600/30 transform -translate-y-6 hover:scale-105 transition active:scale-95">
+        <button onClick={() => setActiveTab('create')} className="p-4 bg-slate-900 text-white rounded-full shadow-xl shadow-slate-900/30 transform -translate-y-6 hover:scale-105 transition active:scale-95 border-4 border-slate-50">
           <Plus className="w-7 h-7" />
         </button>
-        <button onClick={() => setActiveTab('wallet')} className={`p-3 rounded-2xl transition duration-300 flex flex-col items-center gap-1 ${activeTab === 'wallet' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-400 hover:bg-slate-50'}`}>
-          <Wallet className="w-6 h-6" />
-          <span className="text-[10px] font-bold">Wallet</span>
+        <button onClick={() => setActiveTab('wallet')} className={`p-3 rounded-2xl transition-all duration-300 flex flex-col items-center gap-1 ${activeTab === 'wallet' ? 'text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}>
+          <Wallet className={`w-6 h-6 transition-transform ${activeTab === 'wallet' ? '-translate-y-1' : ''}`} strokeWidth={activeTab === 'wallet' ? 2.5 : 2} /> 
+          <span className={`text-[10px] font-bold transition-opacity ${activeTab === 'wallet' ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>Wallet</span>
         </button>
-        <button onClick={() => setSetupNeeded(true)} className="p-3 rounded-2xl text-slate-400 hover:bg-slate-50 flex flex-col items-center gap-1">
-          <User className="w-6 h-6" />
-          <span className="text-[10px] font-bold">Profile</span>
+        <button className="p-3 rounded-2xl text-slate-400 hover:text-slate-600 flex flex-col items-center gap-1">
+          <User className="w-6 h-6" /> 
+          <span className="text-[10px] font-bold opacity-0 h-0 overflow-hidden">Profile</span>
         </button>
       </div>
 
+      {/* Transaction Details Modal */}
+      {activeTransactionId && (
+        <TransactionDetails 
+          transaction={transactions.find(t => t.id === activeTransactionId)!}
+          role={role}
+          userId={session.user.id}
+          onClose={() => setActiveTransactionId(null)}
+          onUpdate={handleUpdateStatus}
+        />
+      )}
     </div>
   );
 };
