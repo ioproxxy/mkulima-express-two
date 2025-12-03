@@ -39,7 +39,8 @@ import {
   Bell,
   Info,
   Scale,
-  TrendingDown
+  TrendingDown,
+  Clock
 } from 'https://esm.sh/lucide-react';
 
 // --- Configuration ---
@@ -66,6 +67,14 @@ interface Transaction {
   delivery_pin?: string; // Secret pin for delivery verification
   category?: string;
   quantity?: number;
+  // Timestamps for progress tracking
+  offer_made_at?: string;
+  contract_formed_at?: string;
+  deposit_paid_at?: string;
+  shipped_at?: string;
+  delivered_at?: string;
+  completed_at?: string;
+  disputed_at?: string;
 }
 
 interface WalletData {
@@ -126,7 +135,14 @@ create table if not exists public.escrow_transactions (
   farmer_email text,
   delivery_pin text default substring(md5(random()::text) from 0 for 7), -- 6 char PIN
   category text default 'Other',
-  quantity numeric default 0
+  quantity numeric default 0,
+  offer_made_at timestamp with time zone,
+  contract_formed_at timestamp with time zone,
+  deposit_paid_at timestamp with time zone,
+  shipped_at timestamp with time zone,
+  delivered_at timestamp with time zone,
+  completed_at timestamp with time zone,
+  disputed_at timestamp with time zone
 );
 
 -- 3. Create Messages Table
@@ -151,6 +167,28 @@ begin
   end if;
   if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='quantity') then
     alter table public.escrow_transactions add column quantity numeric default 0;
+  end if;
+  -- Add timestamp columns
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='offer_made_at') then
+    alter table public.escrow_transactions add column offer_made_at timestamp with time zone;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='contract_formed_at') then
+    alter table public.escrow_transactions add column contract_formed_at timestamp with time zone;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='deposit_paid_at') then
+    alter table public.escrow_transactions add column deposit_paid_at timestamp with time zone;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='shipped_at') then
+    alter table public.escrow_transactions add column shipped_at timestamp with time zone;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='delivered_at') then
+    alter table public.escrow_transactions add column delivered_at timestamp with time zone;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='completed_at') then
+    alter table public.escrow_transactions add column completed_at timestamp with time zone;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='disputed_at') then
+    alter table public.escrow_transactions add column disputed_at timestamp with time zone;
   end if;
 end $$;
 
@@ -737,7 +775,8 @@ const App = () => {
       .update({ 
         vendor_id: session.user.id, 
         vendor_email: session.user.email,
-        status: 'offer_made' // Move to offer_made stage
+        status: 'offer_made', // Move to offer_made stage
+        offer_made_at: new Date().toISOString()
       })
       .eq('id', transactionId)
       // Safety check: ensure it is still listed and unclaimed
@@ -761,7 +800,8 @@ const App = () => {
       .update({ 
         farmer_id: session.user.id, 
         farmer_email: session.user.email,
-        status: 'pending_deposit' // Immediately contract formed, waiting for funding
+        status: 'pending_deposit', // Immediately contract formed, waiting for funding
+        contract_formed_at: new Date().toISOString()
       })
       .eq('id', transactionId)
       // Safety check: ensure it is still listed and unclaimed by a farmer
@@ -892,9 +932,21 @@ const App = () => {
       }
 
       const updates: any = { status: newStatus };
+      const now = new Date().toISOString();
+
+      if (newStatus === 'pending_deposit') updates.contract_formed_at = now; // Also handles "Accept Offer"
+      if (newStatus === 'in_escrow') updates.deposit_paid_at = now;
+      if (newStatus === 'shipped') updates.shipped_at = now;
+      if (newStatus === 'delivered') updates.delivered_at = now;
+      if (newStatus === 'completed') updates.completed_at = now;
+      if (newStatus === 'disputed') updates.disputed_at = now;
+
       if (resetVendor) {
         updates.vendor_id = null;
         updates.vendor_email = null;
+        if (newStatus === 'listed') {
+           updates.offer_made_at = null; // Reset
+        }
       }
 
       const { error } = await supabase.from('escrow_transactions').update(updates).eq('id', transaction.id);
@@ -927,6 +979,12 @@ const App = () => {
         setToast({ message: "Invalid PIN code", type: 'error' });
       }
     }
+
+    // Format Timestamp Helper
+    const formatTime = (ts?: string) => {
+      if (!ts) return null;
+      return new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
 
     // Strict Identity Checks for UI Controls
     const isOwnerFarmer = session.user.id === transaction.farmer_id;
@@ -1007,19 +1065,27 @@ const App = () => {
                    <div className="space-y-6 relative pl-2">
                       <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-slate-100"></div>
                       {[
-                        { s: 'listed', l: 'Listed on Market', done: true },
-                        { s: 'offer_made', l: 'Offer Received', done: transaction.status !== 'listed' },
-                        { s: 'pending_deposit', l: 'Contract Formed', done: ['pending_deposit', 'in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
-                        { s: 'in_escrow', l: 'Funds Secured', done: ['in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
-                        { s: 'shipped', l: 'Goods Shipped', done: ['shipped', 'delivered', 'completed'].includes(transaction.status) },
-                        { s: 'delivered', l: 'Delivered', done: ['delivered', 'completed'].includes(transaction.status) },
-                        { s: 'completed', l: 'Funds Released', done: transaction.status === 'completed' }
+                        { s: 'listed', l: 'Listed on Market', ts: transaction.created_at, done: true },
+                        { s: 'offer_made', l: 'Offer Received', ts: transaction.offer_made_at, done: transaction.status !== 'listed' },
+                        { s: 'pending_deposit', l: 'Contract Formed', ts: transaction.contract_formed_at, done: ['pending_deposit', 'in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
+                        { s: 'in_escrow', l: 'Funds Secured', ts: transaction.deposit_paid_at, done: ['in_escrow', 'shipped', 'delivered', 'completed'].includes(transaction.status) },
+                        { s: 'shipped', l: 'Goods Shipped', ts: transaction.shipped_at, done: ['shipped', 'delivered', 'completed'].includes(transaction.status) },
+                        { s: 'delivered', l: 'Delivered', ts: transaction.delivered_at, done: ['delivered', 'completed'].includes(transaction.status) },
+                        { s: 'completed', l: 'Funds Released', ts: transaction.completed_at, done: transaction.status === 'completed' }
                       ].map((step, idx) => (
-                        <div key={idx} className="relative flex items-center gap-3">
-                           <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center relative z-10 bg-white ${step.done ? 'border-emerald-500 text-emerald-500' : 'border-slate-200 text-slate-300'}`}>
+                        <div key={idx} className="relative flex items-start gap-3">
+                           <div className={`mt-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center relative z-10 bg-white ${step.done ? 'border-emerald-500 text-emerald-500' : 'border-slate-200 text-slate-300'}`}>
                              {step.done ? <CheckCircle className="w-4 h-4" /> : <div className="w-2 h-2 rounded-full bg-slate-200"></div>}
                            </div>
-                           <span className={`text-sm font-medium ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>{step.l}</span>
+                           <div className="flex-1">
+                             <span className={`text-sm font-medium block ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>{step.l}</span>
+                             {step.ts && step.done && (
+                               <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                                 <Clock className="w-3 h-3" />
+                                 {formatTime(step.ts)}
+                               </span>
+                             )}
+                           </div>
                         </div>
                       ))}
                    </div>
