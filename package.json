@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:mpesa": "cd mpesa-server; npm run dev"
   },
   "dependencies": {
     "react": "^19.2.0",

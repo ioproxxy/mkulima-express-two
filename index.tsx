@@ -665,12 +665,39 @@ const App = () => {
   };
 
   const topUpWallet = async () => {
-    if (!session || !wallet) return;
-    const amount = 5000; // Simulated
-    const { error } = await supabase.from('wallets').update({ balance: wallet.balance + amount }).eq('user_id', session.user.id);
-    if (!error) {
-       fetchWallet(session.user.id);
-       setToast({ message: 'Wallet topped up by KES 5,000', type: 'success' });
+    if (!session) return;
+
+    const amount = 5000; // Default top up amount
+    const phoneNumber = prompt('Enter your M-Pesa phone number (e.g. 2547XXXXXXXX):');
+    if (!phoneNumber) return;
+
+    try {
+      const response = await fetch('http://localhost:4000/mpesa/stk-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount,
+          phoneNumber,
+          accountReference: `WALLET_${session.user.id}`,
+          description: 'Mkulima Express wallet top up'
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data?.error?.errorMessage || 'Failed to initiate M-Pesa payment');
+      }
+
+      setToast({
+        message: 'STK Push sent. Check your phone to approve payment.',
+        type: 'info'
+      });
+    } catch (error: any) {
+      setToast({
+        message: error.message || 'Error starting M-Pesa payment',
+        type: 'error'
+      });
     }
   };
 
