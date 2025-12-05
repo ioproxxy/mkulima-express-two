@@ -6,7 +6,8 @@ import {
   LogOut, Home, Store, Plus, User, Loader2, X,
   TrendingUp, ArrowUpRight, ArrowDownRight, Package, Scale,
   Clock, MapPin, Truck, ShieldCheck, AlertCircle, Search,
-  ChevronRight, MessageSquare, Bell, ArrowDown, ArrowUp, Lock
+  ChevronRight, MessageSquare, Bell, ArrowDown, ArrowUp, Lock,
+  SlidersHorizontal, Filter, Edit2, Save, Camera
 } from 'lucide-react';
 
 // Initialize Supabase Client
@@ -27,6 +28,7 @@ interface Transaction {
   farmer_id?: string;
   category?: string;
   quantity?: number;
+  location?: string;
   offer_made_at?: string;
   contract_formed_at?: string;
   funds_deposited_at?: string;
@@ -45,6 +47,15 @@ interface WalletTransaction {
   reference_id?: string;
 }
 
+interface Profile {
+  id: string;
+  display_name: string;
+  phone: string;
+  location: string;
+  bio: string;
+  updated_at?: string;
+}
+
 // SQL Setup Component
 const SetupRequired = () => {
   const [copied, setCopied] = useState(false);
@@ -57,18 +68,28 @@ create table if not exists public.wallets (
   updated_at timestamp with time zone default timezone('utc'::text, now())
 );
 
--- 2. Create Wallet Transactions Table (History)
+-- 2. Create Profiles Table
+create table if not exists public.profiles (
+  id uuid references auth.users(id) primary key,
+  display_name text,
+  phone text,
+  location text,
+  bio text,
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 3. Create Wallet Transactions Table (History)
 create table if not exists public.wallet_transactions (
   id uuid default gen_random_uuid() primary key,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   user_id uuid references auth.users(id) not null,
   amount numeric not null,
-  type text not null, -- 'deposit', 'withdrawal', 'escrow_lock', 'escrow_release', 'payment_in'
+  type text not null,
   reference_id uuid,
   description text
 );
 
--- 3. Create Escrow Transactions Table
+-- 4. Create Escrow Transactions Table
 create table if not exists public.escrow_transactions (
   id uuid default gen_random_uuid() primary key,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -83,6 +104,7 @@ create table if not exists public.escrow_transactions (
   delivery_pin text default substring(md5(random()::text) from 0 for 7),
   category text default 'Other',
   quantity numeric default 0,
+  location text,
   offer_made_at timestamp with time zone,
   contract_formed_at timestamp with time zone,
   funds_deposited_at timestamp with time zone,
@@ -92,7 +114,7 @@ create table if not exists public.escrow_transactions (
   disputed_at timestamp with time zone
 );
 
--- 4. Create Messages Table
+-- 5. Create Messages Table
 create table if not exists public.messages (
   id uuid default gen_random_uuid() primary key,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -102,57 +124,36 @@ create table if not exists public.messages (
   sender_email text
 );
 
--- 5. Add Missing Columns (Safe Migration)
-do $$ 
-begin 
-  -- Timestamps
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='offer_made_at') then
-    alter table public.escrow_transactions add column offer_made_at timestamp with time zone;
-  end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='contract_formed_at') then
-    alter table public.escrow_transactions add column contract_formed_at timestamp with time zone;
-  end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='funds_deposited_at') then
-    alter table public.escrow_transactions add column funds_deposited_at timestamp with time zone;
-  end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='shipped_at') then
-    alter table public.escrow_transactions add column shipped_at timestamp with time zone;
-  end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='delivered_at') then
-    alter table public.escrow_transactions add column delivered_at timestamp with time zone;
-  end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='completed_at') then
-    alter table public.escrow_transactions add column completed_at timestamp with time zone;
-  end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='disputed_at') then
-    alter table public.escrow_transactions add column disputed_at timestamp with time zone;
-  end if;
-  -- Other fields
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='category') then
-    alter table public.escrow_transactions add column category text default 'Other';
-  end if;
-  if not exists (select 1 from information_schema.columns where table_name='escrow_transactions' and column_name='quantity') then
-    alter table public.escrow_transactions add column quantity numeric default 0;
-  end if;
-end $$;
-
 -- 6. RLS Policies
 alter table public.wallets enable row level security;
+alter table public.profiles enable row level security;
 alter table public.wallet_transactions enable row level security;
 alter table public.escrow_transactions enable row level security;
 alter table public.messages enable row level security;
 
+-- Clear existing policies
 drop policy if exists "Access own wallet" on public.wallets;
+drop policy if exists "Public profiles" on public.profiles;
+drop policy if exists "Users can update own profile" on public.profiles;
+drop policy if exists "Users can insert own profile" on public.profiles;
 drop policy if exists "Access own wallet history" on public.wallet_transactions;
-drop policy if exists "Access transactions" on public.escrow_transactions;
 drop policy if exists "View transactions" on public.escrow_transactions;
 drop policy if exists "Insert transactions" on public.escrow_transactions;
 drop policy if exists "Update transactions" on public.escrow_transactions;
 drop policy if exists "Access messages" on public.messages;
 
+-- Wallets
 create policy "Access own wallet" on public.wallets for all using (auth.uid() = user_id);
+
+-- Profiles
+create policy "Public profiles" on public.profiles for select using (true);
+create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
+create policy "Users can insert own profile" on public.profiles for insert with check (auth.uid() = id);
+
+-- Wallet Transactions
 create policy "Access own wallet history" on public.wallet_transactions for all using (auth.uid() = user_id);
 
+-- Escrow Transactions
 create policy "View transactions" on public.escrow_transactions for select
 using (vendor_id = auth.uid() or farmer_id = auth.uid() or status = 'listed');
 
@@ -166,6 +167,7 @@ using (
   (status = 'listed' and farmer_id is null)
 );
 
+-- Messages
 create policy "Access messages" on public.messages for all using (
   exists (select 1 from public.escrow_transactions t where t.id = transaction_id and (t.vendor_id = auth.uid() or t.farmer_id = auth.uid()))
 );
@@ -182,10 +184,10 @@ create policy "Access messages" on public.messages for all using (
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xl">
         <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-4">
           <ShieldCheck className="w-6 h-6 text-emerald-600" />
-          Database Setup Required
+          Database Update Required
         </h2>
         <p className="text-slate-600 mb-4 text-sm">
-          To enable the wallet and market features, please run this SQL in your Supabase SQL Editor.
+          To enable user profiles and advanced filtering, please run this updated SQL in your Supabase SQL Editor.
         </p>
         <div className="relative">
           <pre className="bg-slate-900 text-slate-50 p-4 rounded-lg text-xs overflow-auto h-64 font-mono">{sql}</pre>
@@ -197,7 +199,7 @@ create policy "Access messages" on public.messages for all using (
           </button>
         </div>
         <button onClick={() => window.location.reload()} className="mt-4 w-full bg-emerald-600 text-white py-3 rounded-lg font-bold">
-          I have run the SQL
+          I have run the SQL - Reload App
         </button>
       </div>
     </div>
@@ -274,7 +276,6 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-slate-100 flex items-center justify-center p-6">
       <div className="bg-white w-full max-w-md p-8 rounded-3xl shadow-2xl shadow-emerald-900/10 border border-white/50 backdrop-blur-xl relative overflow-hidden">
-        {/* Decorative blobs */}
         <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-100 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 opacity-50"></div>
         <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-100 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 opacity-50"></div>
 
@@ -336,7 +337,14 @@ const formatDate = (dateStr?: string) => {
 };
 
 // Timeline Step Component
-const TimelineStep = ({ title, date, status, isLast }: { title: string, date?: string, status: 'done' | 'current' | 'pending', isLast?: boolean }) => (
+interface TimelineStepProps {
+  title: string;
+  date?: string;
+  status: 'done' | 'current' | 'pending';
+  isLast?: boolean;
+}
+
+const TimelineStep: React.FC<TimelineStepProps> = ({ title, date, status, isLast }) => (
   <div className="flex gap-4 group">
     <div className="flex flex-col items-center">
       <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 z-10 border-2 transition-all duration-300 ${
@@ -359,6 +367,165 @@ const TimelineStep = ({ title, date, status, isLast }: { title: string, date?: s
     </div>
   </div>
 );
+
+// Profile View Component
+const ProfileView = ({ profile, userRole, email, onUpdateProfile }: { 
+  profile: Profile | null, 
+  userRole: string,
+  email?: string,
+  onUpdateProfile: (p: Partial<Profile>) => Promise<void> 
+}) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState<Partial<Profile>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (profile) {
+      setFormData(profile);
+    }
+  }, [profile]);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onUpdateProfile(formData);
+      setIsEditing(false);
+    } catch (err) {
+      alert("Failed to save profile.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 text-center relative overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-emerald-600 to-teal-500"></div>
+        <div className="relative pt-8">
+          <div className="w-24 h-24 bg-white rounded-full p-1.5 mx-auto shadow-lg mb-4">
+            <div className="w-full h-full bg-slate-100 rounded-full flex items-center justify-center overflow-hidden relative group">
+              <User className="w-10 h-10 text-slate-400" />
+              {isEditing && (
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition cursor-pointer">
+                  <Camera className="w-6 h-6 text-white" />
+                </div>
+              )}
+            </div>
+          </div>
+          <h2 className="text-xl font-bold text-slate-800">{profile?.display_name || "Anonymous User"}</h2>
+          <p className="text-sm text-slate-500 font-medium">{email}</p>
+          <div className="flex justify-center gap-2 mt-3">
+            <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border border-emerald-200">
+              {userRole}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="font-bold text-slate-800 text-lg">Personal Information</h3>
+          {!isEditing ? (
+            <button onClick={() => setIsEditing(true)} className="text-emerald-600 hover:bg-emerald-50 p-2 rounded-full transition">
+              <Edit2 className="w-5 h-5" />
+            </button>
+          ) : (
+            <button onClick={() => setIsEditing(false)} className="text-slate-400 hover:bg-slate-50 p-2 rounded-full transition">
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+
+        {isEditing ? (
+          <form onSubmit={handleSave} className="space-y-4">
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Display Name</label>
+              <input 
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                value={formData.display_name || ''}
+                onChange={e => setFormData({...formData, display_name: e.target.value})}
+                placeholder="Your Name"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Phone Number</label>
+              <input 
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                value={formData.phone || ''}
+                onChange={e => setFormData({...formData, phone: e.target.value})}
+                placeholder="+254..."
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Location</label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input 
+                  className="w-full p-3 pl-10 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                  value={formData.location || ''}
+                  onChange={e => setFormData({...formData, location: e.target.value})}
+                  placeholder="City, County"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Bio</label>
+              <textarea 
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none"
+                value={formData.bio || ''}
+                onChange={e => setFormData({...formData, bio: e.target.value})}
+                placeholder="Tell us about your farm or business..."
+              />
+            </div>
+            <button 
+              disabled={saving}
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition flex items-center justify-center gap-2"
+            >
+              {saving ? <Loader2 className="animate-spin w-5 h-5" /> : <><Save className="w-5 h-5" /> Save Changes</>}
+            </button>
+          </form>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 transition">
+              <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                <User className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase">Display Name</p>
+                <p className="font-medium text-slate-800">{profile?.display_name || "Not set"}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 transition">
+              <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                <User className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase">Phone</p>
+                <p className="font-medium text-slate-800">{profile?.phone || "Not set"}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 transition">
+              <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
+                <MapPin className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-400 uppercase">Location</p>
+                <p className="font-medium text-slate-800">{profile?.location || "Not set"}</p>
+              </div>
+            </div>
+            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 mt-2">
+              <p className="text-xs font-bold text-slate-400 uppercase mb-2">Bio</p>
+              <p className="text-sm text-slate-600 italic leading-relaxed">
+                {profile?.bio || "No bio added yet."}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
 // Transaction Details Component
 const TransactionDetails = ({ 
@@ -458,6 +625,17 @@ const TransactionDetails = ({
                     <div className="text-2xl font-bold text-slate-700 tracking-tight">{t.quantity} <span className="text-sm font-normal text-slate-400">kg</span></div>
                   </div>
                 </div>
+                {t.location && (
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
+                    <div className="p-2 bg-slate-100 rounded-full text-slate-500">
+                      <MapPin className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Location</span>
+                      <p className="font-bold text-slate-700">{t.location}</p>
+                    </div>
+                  </div>
+                )}
                 <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Description</span>
                   <p className="text-sm text-slate-600 leading-relaxed">{t.description || "No specific details provided."}</p>
@@ -740,13 +918,26 @@ const App = () => {
   const [showSetup, setShowSetup] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Profile State
+  const [profile, setProfile] = useState<Profile | null>(null);
+
+  // Advanced Filter State
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({
+    category: 'All',
+    minPrice: '',
+    maxPrice: '',
+    location: ''
+  });
+  
   // Create Form State
   const [createForm, setCreateForm] = useState({
     title: '',
     category: 'Maize',
     quantity: '',
     amount: '',
-    description: ''
+    description: '',
+    location: ''
   });
   const [creating, setCreating] = useState(false);
 
@@ -771,23 +962,50 @@ const App = () => {
   }, []);
 
   const fetchData = async (userId: string) => {
-    const { data: txs, error } = await supabase.from('escrow_transactions').select('*').order('created_at', { ascending: false });
+    // Explicitly select 'location' too
+    const { data: txs, error } = await supabase.from('escrow_transactions').select('*, funds_deposited_at, location').order('created_at', { ascending: false });
     if (error) {
-        if (error.code === '42P01' || error.message.includes('column')) setShowSetup(true); // Table or Column missing
+        if (error.code === '42P01' || error.code === '42703' || error.message.includes('column') || error.message.includes('relation')) {
+            setShowSetup(true); // Table or Column missing
+        }
     } else {
         setTransactions(txs || []);
     }
     
+    // Fetch Profile
+    const { data: profileData, error: profileError } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    if (profileData) {
+      setProfile(profileData);
+    } else if (profileError && (profileError.code === '42P01' || profileError.message.includes('relation'))) {
+       setShowSetup(true);
+    } else {
+      setProfile({ id: userId, display_name: '', phone: '', location: '', bio: '' });
+    }
+
     const { data: walletData } = await supabase.from('wallets').select('*').eq('user_id', userId).single();
     if (walletData) setWallet(walletData);
     else {
-      // Try to create wallet, if it fails due to table missing, showSetup will handle it eventually
       const { data: newWallet } = await supabase.from('wallets').insert([{ user_id: userId, balance: 0 }]).select().single();
       if (newWallet) setWallet(newWallet);
     }
 
     const { data: walletTx } = await supabase.from('wallet_transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false });
     setWalletTransactions(walletTx || []);
+  };
+
+  const handleUpdateProfile = async (updates: Partial<Profile>) => {
+    if (!session?.user) return;
+    try {
+      const { error } = await supabase.from('profiles').upsert({
+        id: session.user.id,
+        ...updates,
+        updated_at: new Date().toISOString()
+      });
+      if (error) throw error;
+      await fetchData(session.user.id);
+    } catch (err: any) {
+      throw err;
+    }
   };
 
   // Market Trends Calculation
@@ -844,6 +1062,7 @@ const App = () => {
         description: createForm.description,
         category: createForm.category,
         quantity: Number(createForm.quantity),
+        location: createForm.location,
         vendor_id: isVendor ? session.user.id : null,
         farmer_id: isVendor ? null : session.user.id,
         vendor_email: isVendor ? session.user.email : null,
@@ -852,7 +1071,7 @@ const App = () => {
       });
 
       if (error) throw error;
-      setCreateForm({ title: '', category: 'Maize', quantity: '', amount: '', description: '' });
+      setCreateForm({ title: '', category: 'Maize', quantity: '', amount: '', description: '', location: '' });
       setActiveTab('dashboard');
       fetchData(session.user.id);
     } catch (err: any) {
@@ -1095,54 +1314,150 @@ const App = () => {
         {/* Market View */}
         {activeTab === 'market' && (
           <div className="space-y-8 animate-in fade-in duration-500">
-            {/* Search Bar */}
+            {/* Search Bar & Filter Toggle */}
             <div className="relative sticky top-0 z-10 pt-2 -mt-2 bg-slate-50/50 backdrop-blur-sm pb-2">
-               <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                  <input
-                    className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium text-slate-700 placeholder:text-slate-400"
-                    placeholder="Search produce..."
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                  />
+               <div className="flex gap-2">
+                 <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input
+                      className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium text-slate-700 placeholder:text-slate-400"
+                      placeholder="Search produce..."
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                    />
+                 </div>
+                 <button 
+                   onClick={() => setShowFilters(!showFilters)}
+                   className={`p-4 rounded-2xl border transition-all shadow-sm ${showFilters ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-200 text-slate-500 hover:text-emerald-600'}`}
+                 >
+                   <SlidersHorizontal className="w-6 h-6" />
+                 </button>
                </div>
+
+               {/* Advanced Filters Panel */}
+               {showFilters && (
+                 <div className="mt-2 bg-white p-4 rounded-2xl border border-slate-200 shadow-md animate-in slide-in-from-top-2">
+                   <div className="flex justify-between items-center mb-3">
+                     <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                       <Filter className="w-4 h-4 text-emerald-600" /> Filters
+                     </h3>
+                     <button onClick={() => setFilters({category: 'All', minPrice: '', maxPrice: '', location: ''})} className="text-[10px] font-bold text-slate-400 hover:text-red-500">
+                       Clear All
+                     </button>
+                   </div>
+                   
+                   <div className="space-y-3">
+                     {/* Category */}
+                     <div>
+                       <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">Category</label>
+                       <select 
+                         className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-emerald-500"
+                         value={filters.category}
+                         onChange={e => setFilters({...filters, category: e.target.value})}
+                       >
+                         <option value="All">All Categories</option>
+                         {['Maize', 'Beans', 'Potatoes', 'Tomatoes', 'Onions', 'Rice', 'Bananas', 'Other'].map(c => (
+                           <option key={c} value={c}>{c}</option>
+                         ))}
+                       </select>
+                     </div>
+
+                     {/* Price Range */}
+                     <div>
+                       <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">Price Range (KES)</label>
+                       <div className="flex gap-2">
+                         <input 
+                           type="number" 
+                           placeholder="Min" 
+                           className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-emerald-500"
+                           value={filters.minPrice}
+                           onChange={e => setFilters({...filters, minPrice: e.target.value})}
+                         />
+                         <input 
+                           type="number" 
+                           placeholder="Max" 
+                           className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-emerald-500"
+                           value={filters.maxPrice}
+                           onChange={e => setFilters({...filters, maxPrice: e.target.value})}
+                         />
+                       </div>
+                     </div>
+
+                     {/* Location */}
+                     <div>
+                       <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">Location</label>
+                       <div className="relative">
+                         <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                         <input 
+                           placeholder="e.g. Nairobi, Nakuru" 
+                           className="w-full p-2.5 pl-9 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-emerald-500"
+                           value={filters.location}
+                           onChange={e => setFilters({...filters, location: e.target.value})}
+                         />
+                       </div>
+                     </div>
+                   </div>
+                 </div>
+               )}
             </div>
 
             {/* Market Trends Section */}
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="bg-slate-900 p-1.5 rounded-lg">
-                  <TrendingUp className="w-4 h-4 text-white" />
-                </div>
-                <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Rolling 7-Day Trends</h2>
-              </div>
-              
-              {marketTrends.length > 0 ? (
-                <div className="flex gap-4 overflow-x-auto no-scrollbar pb-4 snap-x">
-                  {marketTrends.map((item) => (
-                    <div key={item.name} className="min-w-[160px] bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col snap-start hover:shadow-md transition-shadow relative overflow-hidden">
-                      <div className={`absolute top-0 right-0 w-16 h-16 rounded-bl-full opacity-10 ${item.isUp ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
-                      <span className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">{item.name}</span>
-                      <div className="flex items-baseline gap-1 mt-auto">
-                        <span className="text-2xl font-extrabold text-slate-800 tracking-tight">KES {item.price.toFixed(0)}</span>
-                        <span className="text-[10px] text-slate-400 font-medium">/kg</span>
-                      </div>
-                      <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-bold ${item.isUp ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-red-600 bg-red-50 border-red-100'} w-fit px-2.5 py-1 rounded-lg border`}>
-                        {item.isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                        {Math.abs(item.change).toFixed(1)}%
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="bg-white p-6 rounded-2xl border border-slate-100 text-center shadow-sm">
-                  <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                    <Scale className="w-6 h-6 text-slate-300" />
+            {!showFilters && (
+              <div>
+                <style>{`
+                  @keyframes ticker {
+                    0% { transform: translateX(0); }
+                    100% { transform: translateX(-50%); }
+                  }
+                  .animate-ticker {
+                    animation: ticker 40s linear infinite;
+                    width: max-content;
+                  }
+                  .animate-ticker:hover {
+                    animation-play-state: paused;
+                  }
+                `}</style>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="bg-slate-900 p-1.5 rounded-lg">
+                    <TrendingUp className="w-4 h-4 text-white" />
                   </div>
-                  <p className="text-xs text-slate-500 font-medium">Not enough data to calculate market trends yet.</p>
+                  <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Rolling 7-Day Trends</h2>
                 </div>
-              )}
-            </div>
+                
+                {marketTrends.length > 0 ? (
+                  <div className="relative overflow-hidden w-full -mx-5 px-5 py-2">
+                    {/* Gradient Masks */}
+                    <div className="absolute left-0 top-0 bottom-0 w-12 z-10 bg-gradient-to-r from-slate-50 to-transparent pointer-events-none"></div>
+                    <div className="absolute right-0 top-0 bottom-0 w-12 z-10 bg-gradient-to-l from-slate-50 to-transparent pointer-events-none"></div>
+                    
+                    <div className="flex animate-ticker">
+                      {/* Render double the items for seamless looping. Using margin instead of gap for perfect -50% offset calculation. */}
+                      {[...marketTrends, ...marketTrends].map((item, idx) => (
+                        <div key={`${item.name}-${idx}`} className="mr-4 min-w-[160px] bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col hover:shadow-md transition-shadow relative overflow-hidden">
+                          <div className={`absolute top-0 right-0 w-16 h-16 rounded-bl-full opacity-10 ${item.isUp ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                          <span className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">{item.name}</span>
+                          <div className="flex items-baseline gap-1 mt-auto">
+                            <span className="text-2xl font-extrabold text-slate-800 tracking-tight">KES {item.price.toFixed(0)}</span>
+                            <span className="text-[10px] text-slate-400 font-medium">/kg</span>
+                          </div>
+                          <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-bold ${item.isUp ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-red-600 bg-red-50 border-red-100'} w-fit px-2.5 py-1 rounded-lg border`}>
+                            {item.isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+                            {Math.abs(item.change).toFixed(1)}%
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-white p-6 rounded-2xl border border-slate-100 text-center shadow-sm">
+                    <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Scale className="w-6 h-6 text-slate-300" />
+                    </div>
+                    <p className="text-xs text-slate-500 font-medium">Not enough data to calculate market trends yet.</p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Active Listings */}
             <div>
@@ -1150,23 +1465,43 @@ const App = () => {
                 <div className="bg-slate-900 p-1.5 rounded-lg">
                   <Package className="w-4 h-4 text-white" />
                 </div>
-                <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Recent Listings</h2>
+                <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">
+                  {showFilters ? 'Filtered Listings' : 'Recent Listings'}
+                </h2>
               </div>
 
               <div className="grid grid-cols-1 gap-4">
                 {(() => {
                   const filteredListings = transactions.filter(t => 
                     t.status === 'listed' && (
-                      t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (t.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                      (t.category || '').toLowerCase().includes(searchQuery.toLowerCase())
+                      // Search Query Filter
+                      (searchQuery === '' || 
+                        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        (t.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        (t.category || '').toLowerCase().includes(searchQuery.toLowerCase())
+                      ) &&
+                      // Category Filter
+                      (filters.category === 'All' || t.category === filters.category) &&
+                      // Price Range Filter
+                      (filters.minPrice === '' || t.amount >= Number(filters.minPrice)) &&
+                      (filters.maxPrice === '' || t.amount <= Number(filters.maxPrice)) &&
+                      // Location Filter
+                      (filters.location === '' || (t.location || '').toLowerCase().includes(filters.location.toLowerCase()))
                     )
                   );
 
                   if (filteredListings.length === 0) {
                     return (
                       <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200">
-                        <p className="text-slate-500 text-sm font-medium">No listings available matching "{searchQuery}".</p>
+                        <p className="text-slate-500 text-sm font-medium">No listings found matching your criteria.</p>
+                        {(filters.category !== 'All' || filters.minPrice || filters.maxPrice || filters.location) && (
+                          <button 
+                            onClick={() => setFilters({category: 'All', minPrice: '', maxPrice: '', location: ''})}
+                            className="mt-2 text-emerald-600 font-bold text-xs hover:underline"
+                          >
+                            Clear Filters
+                          </button>
+                        )}
                       </div>
                     );
                   }
@@ -1175,13 +1510,18 @@ const App = () => {
                     <div key={t.id} onClick={() => handleClaim(t.id)} className="bg-white p-0 rounded-2xl border border-slate-100 shadow-sm hover:border-emerald-500 transition-all group overflow-hidden cursor-pointer relative">
                       <div className="p-5 flex justify-between items-start">
                         <div className="flex-1 min-w-0 pr-4">
-                          <div className="flex items-center gap-2 mb-2">
+                          <div className="flex flex-wrap items-center gap-2 mb-2">
                             <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider">
                               {t.category || 'Produce'}
                             </span>
                             {t.quantity && t.quantity > 0 && (
                               <span className="flex items-center gap-1 text-[10px] text-slate-500 font-bold bg-slate-50 px-2 py-1 rounded-md">
                                 <Scale className="w-3 h-3" /> {t.quantity}kg
+                              </span>
+                            )}
+                            {t.location && (
+                              <span className="flex items-center gap-1 text-[10px] text-slate-500 font-bold bg-slate-50 px-2 py-1 rounded-md">
+                                <MapPin className="w-3 h-3" /> {t.location}
                               </span>
                             )}
                           </div>
@@ -1289,10 +1629,23 @@ const App = () => {
                 </div>
 
                 <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Location</label>
+                  <div className="relative">
+                    <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                    <input 
+                      className="w-full p-4 pl-12 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium placeholder:font-normal"
+                      placeholder="e.g. Nairobi, Nakuru, Eldoret"
+                      value={createForm.location}
+                      onChange={e => setCreateForm({...createForm, location: e.target.value})}
+                    />
+                  </div>
+                </div>
+
+                <div>
                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Description</label>
                   <textarea 
                     className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none h-32 resize-none transition font-medium placeholder:font-normal"
-                    placeholder="Describe quality, packaging, pickup location..."
+                    placeholder="Describe quality, packaging, specific pickup details..."
                     value={createForm.description}
                     onChange={e => setCreateForm({...createForm, description: e.target.value})}
                   />
@@ -1331,6 +1684,15 @@ const App = () => {
             onWithdraw={handleWithdraw}
           />
         )}
+
+        {activeTab === 'profile' && (
+          <ProfileView 
+            profile={profile}
+            userRole={role}
+            email={session?.user?.email}
+            onUpdateProfile={handleUpdateProfile}
+          />
+        )}
       </div>
 
       {/* Bottom Nav */}
@@ -1350,9 +1712,9 @@ const App = () => {
           <Wallet className={`w-6 h-6 transition-transform ${activeTab === 'wallet' ? '-translate-y-1' : ''}`} strokeWidth={activeTab === 'wallet' ? 2.5 : 2} /> 
           <span className={`text-[10px] font-bold transition-opacity ${activeTab === 'wallet' ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>Wallet</span>
         </button>
-        <button className="p-3 rounded-2xl text-slate-400 hover:text-slate-600 flex flex-col items-center gap-1">
-          <User className="w-6 h-6" /> 
-          <span className="text-[10px] font-bold opacity-0 h-0 overflow-hidden">Profile</span>
+        <button onClick={() => setActiveTab('profile')} className={`p-3 rounded-2xl transition-all duration-300 flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}>
+          <User className={`w-6 h-6 transition-transform ${activeTab === 'profile' ? '-translate-y-1' : ''}`} strokeWidth={activeTab === 'profile' ? 2.5 : 2} /> 
+          <span className={`text-[10px] font-bold transition-opacity ${activeTab === 'profile' ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>Profile</span>
         </button>
       </div>
 
