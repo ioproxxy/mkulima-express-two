@@ -10,8 +10,11 @@
     "dev:mpesa": "cd mpesa-server; npm run dev"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "lucide-react": "^0.294.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "react-qr-code": "^2.0.12"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

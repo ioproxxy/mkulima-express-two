@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createClient } from '@supabase/supabase-js';
+import QRCode from 'react-qr-code';
 import {
   Wallet, Leaf, CheckCircle, CreditCard,
   LogOut, Home, Store, Plus, User, Loader2, X,
   TrendingUp, ArrowUpRight, ArrowDownRight, Package, Scale,
   Clock, MapPin, Truck, ShieldCheck, AlertCircle, Search,
   ChevronRight, MessageSquare, Bell, ArrowDown, ArrowUp, Lock,
-  SlidersHorizontal, Filter, Edit2, Save, Camera
+  SlidersHorizontal, Filter, Edit2, Save, Camera, ArrowUpDown,
+  ScanLine, QrCode, Send
 } from 'lucide-react';
 
 // Initialize Supabase Client
@@ -26,6 +28,9 @@ interface Transaction {
   status: string;
   vendor_id?: string;
   farmer_id?: string;
+  vendor_email?: string;
+  farmer_email?: string;
+  delivery_pin?: string;
   category?: string;
   quantity?: number;
   location?: string;
@@ -54,6 +59,15 @@ interface Profile {
   location: string;
   bio: string;
   updated_at?: string;
+}
+
+interface Message {
+  id: string;
+  created_at: string;
+  content: string;
+  sender_id: string;
+  sender_email?: string;
+  transaction_id: string;
 }
 
 // SQL Setup Component
@@ -141,6 +155,8 @@ drop policy if exists "View transactions" on public.escrow_transactions;
 drop policy if exists "Insert transactions" on public.escrow_transactions;
 drop policy if exists "Update transactions" on public.escrow_transactions;
 drop policy if exists "Access messages" on public.messages;
+drop policy if exists "View messages" on public.messages;
+drop policy if exists "Insert messages" on public.messages;
 
 -- Wallets
 create policy "Access own wallet" on public.wallets for all using (auth.uid() = user_id);
@@ -168,8 +184,12 @@ using (
 );
 
 -- Messages
-create policy "Access messages" on public.messages for all using (
+create policy "View messages" on public.messages for select using (
   exists (select 1 from public.escrow_transactions t where t.id = transaction_id and (t.vendor_id = auth.uid() or t.farmer_id = auth.uid()))
+);
+
+create policy "Insert messages" on public.messages for insert with check (
+  auth.uid() = sender_id
 );
 `;
 
@@ -531,28 +551,117 @@ const ProfileView = ({ profile, userRole, email, onUpdateProfile }: {
 const TransactionDetails = ({ 
   transaction: t, 
   role, 
-  userId, 
+  userId,
+  userEmail,
   onClose, 
   onUpdate 
 }: { 
   transaction: Transaction, 
   role: string, 
   userId: string, 
+  userEmail?: string,
   onClose: () => void,
   onUpdate: (txId: string, status: string, field: string) => void
 }) => {
   const isBuyer = t.vendor_id === userId;
   const isSeller = t.farmer_id === userId;
   const [updating, setUpdating] = useState(false);
-  const [activeTab, setActiveTab] = useState('status'); // status, chat
+  const [activeTab, setActiveTab] = useState('status'); // status, chat, logistics
 
-  // Messages Mock for UI (In real app, fetch these)
-  const [message, setMessage] = useState('');
+  // Chat State
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Logistics State
+  const [deliveryPinInput, setDeliveryPinInput] = useState('');
+  const [showScannerMock, setShowScannerMock] = useState(false);
+
+  useEffect(() => {
+    // Scroll to bottom of chat
+    if (chatContainerRef.current) {
+        chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [messages, activeTab]);
+
+  useEffect(() => {
+    // Fetch Messages
+    const fetchMessages = async () => {
+        const { data } = await supabase.from('messages').select('*').eq('transaction_id', t.id).order('created_at', { ascending: true });
+        if (data) setMessages(data);
+    };
+    fetchMessages();
+
+    // Subscribe to new messages
+    const channel = supabase.channel(`tx_chat_${t.id}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `transaction_id=eq.${t.id}` }, (payload) => {
+            const newMsg = payload.new as Message;
+            // Add message only if we don't have it (prevent duplicate from optimistic update)
+            setMessages(prev => {
+                if (prev.some(m => m.id === newMsg.id)) return prev;
+                return [...prev, newMsg];
+            });
+        })
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(channel);
+    }
+  }, [t.id]);
   
   const handleAction = async (newStatus: string, timestampField: string) => {
     setUpdating(true);
     await onUpdate(t.id, newStatus, timestampField);
     setUpdating(false);
+  };
+
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const content = newMessage.trim();
+    if (!content) return;
+    
+    // 1. Optimistic Update (Immediate Feedback)
+    const tempId = Math.random().toString();
+    const optimisticMsg: Message = {
+        id: tempId,
+        created_at: new Date().toISOString(),
+        content: content,
+        sender_id: userId,
+        sender_email: userEmail,
+        transaction_id: t.id
+    };
+    setMessages(prev => [...prev, optimisticMsg]);
+    setNewMessage('');
+    
+    try {
+        // 2. Network Request
+        const { data, error } = await supabase.from('messages').insert({
+            transaction_id: t.id,
+            sender_id: userId,
+            sender_email: userEmail,
+            content: content
+        }).select().single();
+
+        if (error) throw error;
+
+        // 3. Replace Optimistic Message with Real One
+        if (data) {
+            setMessages(prev => prev.map(m => m.id === tempId ? data : m));
+        }
+    } catch (err) {
+        alert('Failed to send message');
+        // Revert optimistic update
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+        setNewMessage(content);
+    }
+  };
+
+  const verifyDelivery = async () => {
+    if (deliveryPinInput === t.delivery_pin) {
+        await handleAction('delivered', 'delivered_at');
+    } else {
+        alert("Incorrect PIN. Delivery verification failed.");
+    }
   };
 
   const steps = [
@@ -599,7 +708,7 @@ const TransactionDetails = ({
             onClick={() => setActiveTab('status')}
             className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'status' ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
           >
-            Status & Details
+            Details
           </button>
           <button 
             onClick={() => setActiveTab('chat')}
@@ -607,11 +716,17 @@ const TransactionDetails = ({
           >
             Chat & Support
           </button>
+          <button 
+            onClick={() => setActiveTab('logistics')}
+            className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'logistics' ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+          >
+            Logistics
+          </button>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-0 scroll-smooth">
-          {activeTab === 'status' ? (
+        <div className="flex-1 overflow-y-auto p-0 scroll-smooth bg-slate-50">
+          {activeTab === 'status' && (
             <>
               {/* Info Card */}
               <div className="p-5 bg-slate-50/50 border-b border-slate-100 space-y-4">
@@ -660,41 +775,145 @@ const TransactionDetails = ({
                 </div>
               </div>
             </>
-          ) : (
+          )}
+
+          {activeTab === 'chat' && (
             <div className="flex flex-col h-full bg-slate-50">
-              <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+              <div className="flex-1 p-4 space-y-3 overflow-y-auto" ref={chatContainerRef}>
                 <div className="text-center py-6">
                   <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
                     <MessageSquare className="w-6 h-6" />
                   </div>
-                  <p className="text-slate-500 text-sm">Secure Chat</p>
-                  <p className="text-slate-400 text-xs">Messages are end-to-end encrypted.</p>
+                  <p className="text-slate-500 text-sm font-bold">Secure Chat</p>
+                  <p className="text-slate-400 text-xs">Direct messages between Farmer & Vendor.</p>
                 </div>
-                {/* Mock Message */}
-                <div className="flex justify-end">
-                  <div className="bg-emerald-600 text-white p-3 rounded-2xl rounded-tr-none max-w-[80%] shadow-md text-sm">
-                    Hi! Is the produce ready for pickup?
-                  </div>
-                </div>
-                <div className="flex justify-start">
-                  <div className="bg-white text-slate-700 p-3 rounded-2xl rounded-tl-none max-w-[80%] shadow-sm border border-slate-200 text-sm">
-                    Yes, it's packed and ready.
-                  </div>
-                </div>
+                
+                {messages.length === 0 && (
+                    <div className="text-center text-slate-400 text-xs py-4">No messages yet. Say hello!</div>
+                )}
+
+                {messages.map(msg => {
+                    const isMe = msg.sender_id === userId;
+                    return (
+                        <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[80%] p-3 rounded-2xl text-sm shadow-sm ${isMe ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-white text-slate-700 rounded-tl-none border border-slate-200'}`}>
+                                <p>{msg.content}</p>
+                                <p className={`text-[10px] mt-1 ${isMe ? 'text-emerald-200' : 'text-slate-400'}`}>
+                                    {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </p>
+                            </div>
+                        </div>
+                    )
+                })}
               </div>
-              <div className="p-3 bg-white border-t border-slate-200">
+              <form onSubmit={handleSendMessage} className="p-3 bg-white border-t border-slate-200 sticky bottom-0">
                 <div className="flex gap-2">
                   <input 
                     className="flex-1 bg-slate-100 border-transparent focus:bg-white focus:border-emerald-500 focus:ring-0 rounded-xl px-4 py-3 text-sm transition"
                     placeholder="Type a message..."
-                    value={message}
-                    onChange={e => setMessage(e.target.value)}
+                    value={newMessage}
+                    onChange={e => setNewMessage(e.target.value)}
                   />
-                  <button className="bg-emerald-600 hover:bg-emerald-700 text-white p-3 rounded-xl transition shadow-lg shadow-emerald-600/20">
-                    <ArrowUpRight className="w-5 h-5" />
+                  <button type="submit" disabled={!newMessage.trim()} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white p-3 rounded-xl transition shadow-lg shadow-emerald-600/20">
+                    <Send className="w-5 h-5" />
                   </button>
                 </div>
-              </div>
+              </form>
+            </div>
+          )}
+
+          {activeTab === 'logistics' && (
+            <div className="p-6 space-y-6">
+                {(isSeller || isBuyer) ? (
+                    <>
+                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 text-center">
+                            <h3 className="font-bold text-slate-800 mb-2">Delivery Verification</h3>
+                            <p className="text-slate-500 text-xs mb-6">Use the secure PIN to verify delivery upon arrival.</p>
+                            
+                            {isSeller && (
+                                <div className="flex flex-col items-center">
+                                    {(t.status === 'shipped' || t.status === 'delivered') ? (
+                                        <>
+                                            <div className="bg-white p-4 rounded-xl border-2 border-slate-900 mb-4 shadow-xl">
+                                                {t.delivery_pin ? <QRCode value={t.delivery_pin} size={150} /> : <div className="w-[150px] h-[150px] bg-slate-100 flex items-center justify-center text-xs text-slate-400">Error</div>}
+                                            </div>
+                                            <div className="bg-emerald-50 text-emerald-800 px-4 py-2 rounded-lg font-mono text-xl font-bold tracking-widest border border-emerald-100">
+                                                {t.delivery_pin}
+                                            </div>
+                                            <p className="text-xs text-slate-500 mt-4 max-w-xs mx-auto">
+                                                Allow the Vendor to scan this code or provide them the PIN upon delivery to release funds.
+                                            </p>
+                                        </>
+                                    ) : (
+                                        <div className="p-8 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 w-full">
+                                            <QrCode className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                                            <p className="text-sm text-slate-400">QR Code will appear when goods are Shipped.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {isBuyer && (
+                                <div>
+                                    {(t.status === 'shipped') ? (
+                                        <>
+                                            {showScannerMock ? (
+                                                <div className="relative aspect-square bg-black rounded-xl overflow-hidden mb-4 group cursor-pointer" onClick={() => setShowScannerMock(false)}>
+                                                    <div className="absolute inset-0 flex items-center justify-center">
+                                                        <div className="w-48 h-48 border-2 border-emerald-500 rounded-lg animate-pulse"></div>
+                                                    </div>
+                                                    <p className="absolute bottom-4 left-0 right-0 text-white text-xs font-bold">Simulating Camera...</p>
+                                                    <X className="absolute top-2 right-2 text-white w-6 h-6" />
+                                                </div>
+                                            ) : (
+                                                <button onClick={() => setShowScannerMock(true)} className="w-full py-8 mb-6 border-2 border-dashed border-emerald-200 bg-emerald-50/50 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-emerald-50 transition">
+                                                    <ScanLine className="w-8 h-8 text-emerald-600" />
+                                                    <span className="text-sm font-bold text-emerald-700">Scan Seller's QR Code</span>
+                                                </button>
+                                            )}
+                                            
+                                            <div className="relative">
+                                                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
+                                                <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-slate-400 font-bold">Or Enter PIN</span></div>
+                                            </div>
+
+                                            <div className="mt-4 flex gap-2">
+                                                <input 
+                                                    className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-center font-mono text-lg tracking-widest uppercase outline-none focus:ring-2 focus:ring-emerald-500"
+                                                    placeholder="PIN"
+                                                    maxLength={7}
+                                                    value={deliveryPinInput}
+                                                    onChange={e => setDeliveryPinInput(e.target.value)}
+                                                />
+                                                <button 
+                                                    onClick={verifyDelivery}
+                                                    className="bg-slate-900 text-white px-6 rounded-xl font-bold hover:bg-slate-800 transition"
+                                                >
+                                                    Verify
+                                                </button>
+                                            </div>
+                                        </>
+                                    ) : t.status === 'delivered' || t.status === 'completed' ? (
+                                        <div className="py-8">
+                                            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                                                <CheckCircle className="w-8 h-8 text-emerald-600" />
+                                            </div>
+                                            <h4 className="font-bold text-emerald-800">Delivery Verified!</h4>
+                                            <p className="text-xs text-emerald-600 mt-1">Transaction is secured.</p>
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-slate-400 italic">Waiting for shipment...</p>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </>
+                ) : (
+                    <div className="text-center py-10">
+                        <Lock className="w-12 h-12 text-slate-200 mx-auto mb-3" />
+                        <p className="text-slate-400 text-sm font-medium">Logistics information is only available to the Buyer and Seller.</p>
+                    </div>
+                )}
             </div>
           )}
         </div>
@@ -734,11 +953,10 @@ const TransactionDetails = ({
 
             {isBuyer && t.status === 'shipped' && (
               <button 
-                onClick={() => handleAction('delivered', 'delivered_at')}
-                disabled={updating}
+                onClick={() => setActiveTab('logistics')}
                 className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
               >
-                {updating ? <Loader2 className="animate-spin" /> : <><MapPin className="w-5 h-5" /> Confirm Delivery</>}
+                <ScanLine className="w-5 h-5" /> Confirm Delivery via QR
               </button>
             )}
 
@@ -940,6 +1158,7 @@ const App = () => {
     location: ''
   });
   const [creating, setCreating] = useState(false);
+  const [trendSort, setTrendSort] = useState<'price-desc' | 'price-asc' | 'name-asc'>('price-desc');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -962,8 +1181,8 @@ const App = () => {
   }, []);
 
   const fetchData = async (userId: string) => {
-    // Explicitly select 'location' too
-    const { data: txs, error } = await supabase.from('escrow_transactions').select('*, funds_deposited_at, location').order('created_at', { ascending: false });
+    // Explicitly select 'location' and 'delivery_pin' too
+    const { data: txs, error } = await supabase.from('escrow_transactions').select('*, funds_deposited_at, location, delivery_pin').order('created_at', { ascending: false });
     if (error) {
         if (error.code === '42P01' || error.code === '42703' || error.message.includes('column') || error.message.includes('relation')) {
             setShowSetup(true); // Table or Column missing
@@ -1017,7 +1236,7 @@ const App = () => {
 
     const categories = ['Maize', 'Beans', 'Potatoes', 'Tomatoes', 'Onions', 'Rice', 'Bananas'];
     
-    return categories.map(cat => {
+    let trends = categories.map(cat => {
       const catTxs = transactions.filter(t => 
         t.category === cat && 
         t.amount > 0 && 
@@ -1048,8 +1267,14 @@ const App = () => {
         hasData: recentTxs.length > 0 || prevTxs.length > 0,
         isUp: currentAvg >= prevAvg
       };
-    }).filter(t => t.hasData).sort((a, b) => b.price - a.price);
-  }, [transactions]);
+    }).filter(t => t.hasData);
+
+    return trends.sort((a, b) => {
+      if (trendSort === 'name-asc') return a.name.localeCompare(b.name);
+      if (trendSort === 'price-asc') return a.price - b.price;
+      return b.price - a.price;
+    });
+  }, [transactions, trendSort]);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1412,16 +1637,34 @@ const App = () => {
                   .animate-ticker {
                     animation: ticker 40s linear infinite;
                     width: max-content;
+                    display: flex;
                   }
                   .animate-ticker:hover {
                     animation-play-state: paused;
                   }
                 `}</style>
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="bg-slate-900 p-1.5 rounded-lg">
-                    <TrendingUp className="w-4 h-4 text-white" />
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="bg-slate-900 p-1.5 rounded-lg">
+                      <TrendingUp className="w-4 h-4 text-white" />
+                    </div>
+                    <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Rolling 7-Day Trends</h2>
                   </div>
-                  <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Rolling 7-Day Trends</h2>
+                  
+                  {marketTrends.length > 0 && (
+                    <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-sm">
+                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                      <select 
+                        value={trendSort} 
+                        onChange={(e) => setTrendSort(e.target.value as any)}
+                        className="text-[10px] font-bold text-slate-600 bg-transparent border-none outline-none cursor-pointer hover:text-emerald-700 transition appearance-none pr-1"
+                      >
+                        <option value="price-desc">Highest Price</option>
+                        <option value="price-asc">Lowest Price</option>
+                        <option value="name-asc">Name (A-Z)</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
                 
                 {marketTrends.length > 0 ? (
@@ -1433,14 +1676,14 @@ const App = () => {
                     <div className="flex animate-ticker">
                       {/* Render double the items for seamless looping. Using margin instead of gap for perfect -50% offset calculation. */}
                       {[...marketTrends, ...marketTrends].map((item, idx) => (
-                        <div key={`${item.name}-${idx}`} className="mr-4 min-w-[160px] bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col hover:shadow-md transition-shadow relative overflow-hidden">
-                          <div className={`absolute top-0 right-0 w-16 h-16 rounded-bl-full opacity-10 ${item.isUp ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                        <div key={`${item.name}-${idx}`} className="mr-4 min-w-[160px] bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col hover:shadow-md transition-shadow relative overflow-hidden group">
+                          <div className={`absolute top-0 right-0 w-16 h-16 rounded-bl-full opacity-10 transition-colors ${item.isUp ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
                           <span className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">{item.name}</span>
                           <div className="flex items-baseline gap-1 mt-auto">
                             <span className="text-2xl font-extrabold text-slate-800 tracking-tight">KES {item.price.toFixed(0)}</span>
                             <span className="text-[10px] text-slate-400 font-medium">/kg</span>
                           </div>
-                          <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-bold ${item.isUp ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-red-600 bg-red-50 border-red-100'} w-fit px-2.5 py-1 rounded-lg border`}>
+                          <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-bold ${item.isUp ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : 'text-red-700 bg-red-50 border-red-100'} w-fit px-2.5 py-1 rounded-lg border`}>
                             {item.isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
                             {Math.abs(item.change).toFixed(1)}%
                           </div>
@@ -1724,6 +1967,7 @@ const App = () => {
           transaction={transactions.find(t => t.id === activeTransactionId)!}
           role={role}
           userId={session.user.id}
+          userEmail={session.user.email}
           onClose={() => setActiveTransactionId(null)}
           onUpdate={handleUpdateStatus}
         />
