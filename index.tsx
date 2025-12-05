@@ -2169,19 +2169,6 @@ const OnboardingTour = ({ onFinish }: { onFinish: () => void }) => {
         <button
           type="button"
           onClick={handleNext}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py
-              <div
-                key={i}
-                className={`h-1.5 w-4 rounded-full ${
-                  i <= step ? 'bg-emerald-500' : 'bg-slate-200'
-                }`}
-              />
-            ))}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={handleNext}
           className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
         >
           {isLast ? 'Got it, start using app' : 'Next'}
