@@ -11,7 +11,7 @@ import {
   SlidersHorizontal, Filter, Edit2, Save, Camera, ArrowUpDown,
   ScanLine, QrCode, Send, Mail, HelpCircle, ShoppingBag, Megaphone,
   List, Handshake, XCircle, Gavel, Info, AlertTriangle, Star, History,
-  Sparkles, MousePointerClick
+  Sparkles, MousePointerClick, Phone
 } from 'lucide-react';
 
 // Initialize Supabase Client
@@ -482,6 +482,13 @@ const App = () => {
   const [selectedTxId, setSelectedTxId] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState('All');
   
+  // Profile State
+  const [profileName, setProfileName] = useState('');
+  const [profilePhone, setProfilePhone] = useState('');
+  const [profileLocation, setProfileLocation] = useState('');
+  const [profileEmail, setProfileEmail] = useState('');
+  const [profileErrors, setProfileErrors] = useState<any>({});
+  
   // Tour State
   const [tourStepIndex, setTourStepIndex] = useState(-1);
 
@@ -525,7 +532,13 @@ const App = () => {
       }
       setSession(session);
       if (session) {
-        setRole(session.user.user_metadata.role || 'vendor');
+        const meta = session.user.user_metadata;
+        setRole(meta.role || 'vendor');
+        setProfileName(meta.full_name || '');
+        setProfilePhone(meta.phone || '');
+        setProfileLocation(meta.location || '');
+        setProfileEmail(session.user.email || '');
+        
         fetchTransactions();
         fetchWallet(session.user.id);
       } else {
@@ -536,7 +549,13 @@ const App = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        setRole(session.user.user_metadata.role || 'vendor');
+        const meta = session.user.user_metadata;
+        setRole(meta.role || 'vendor');
+        setProfileName(meta.full_name || '');
+        setProfilePhone(meta.phone || '');
+        setProfileLocation(meta.location || '');
+        setProfileEmail(session.user.email || '');
+
         fetchTransactions();
         fetchWallet(session.user.id);
       } else {
@@ -662,6 +681,52 @@ const App = () => {
       setView('dashboard');
       fetchTransactions();
       setNotification({ message: "Listed successfully on the market!", type: "success" });
+    }
+  };
+
+  const validateProfile = () => {
+    const errors: any = {};
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    
+    if (!profileName.trim()) errors.name = "Full name is required";
+    if (!emailRegex.test(profileEmail)) errors.email = "Invalid email address format";
+    if (profilePhone.replace(/\D/g, '').length < 10) errors.phone = "Phone number must be at least 10 digits";
+    if (!profileLocation.trim()) errors.location = "Location is required";
+
+    setProfileErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleSaveProfile = async () => {
+    if (!validateProfile()) {
+        setNotification({ message: "Please fix the errors in the form.", type: "error" });
+        return;
+    }
+
+    setLoading(true);
+    const attributes: any = {
+        data: {
+            full_name: profileName,
+            phone: profilePhone,
+            location: profileLocation
+        }
+    };
+    if (profileEmail !== session.user.email) {
+        attributes.email = profileEmail;
+    }
+
+    const { error } = await supabase.auth.updateUser(attributes);
+
+    setLoading(false);
+
+    if (error) {
+        setNotification({ message: error.message, type: "error" });
+    } else {
+        setNotification({ message: "Profile updated successfully!", type: "success" });
+        if (profileEmail !== session.user.email) {
+             setNotification({ message: "Check your new email for a verification link.", type: "info" });
+        }
+        setView('dashboard');
     }
   };
 
@@ -826,8 +891,30 @@ const App = () => {
       } else {
         fetchTransactions();
         fetchWallet(session.user.id);
+        
+        let successMessage = "Transaction updated successfully";
+        if (cancel) {
+            successMessage = "Offer rejected successfully";
+        } else {
+            const statusMessages: Record<string, string> = {
+                'pending_deposit': "Offer Accepted! Waiting for deposit.",
+                'in_escrow': "Funds securely deposited to Escrow.",
+                'shipped': "Item marked as Shipped. Buyer notified.",
+                'delivered': "Delivery verified successfully!",
+                'completed': "Transaction completed. Funds released to Farmer.",
+                'disputed': "Dispute raised. Support team notified."
+            };
+            if (statusMessages[newStatus]) {
+                successMessage = statusMessages[newStatus];
+            }
+        }
+
+        setNotification({ 
+            message: successMessage, 
+            type: newStatus === 'disputed' ? 'error' : 'success' 
+        });
+
         if (newStatus === 'completed' || cancel) {
-          setNotification({ message: "Transaction updated successfully", type: "success" });
           if(cancel) onClose();
         }
       }
@@ -1455,6 +1542,90 @@ const App = () => {
             </div>
           </div>
         )}
+
+        {view === 'profile' && (
+          <div className="animate-in fade-in duration-300">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-slate-800">Edit Profile</h2>
+                <button 
+                  onClick={() => setSetupRequired(true)} 
+                  className="text-[10px] bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full font-bold hover:bg-slate-200 transition"
+                >
+                  DB Setup
+                </button>
+              </div>
+              
+              <div className="space-y-5">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Full Name</label>
+                  <div className="relative">
+                    <input 
+                      className={`w-full p-3 pl-10 bg-slate-50 border ${profileErrors.name ? 'border-red-300' : 'border-slate-200'} rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none`}
+                      placeholder="John Doe"
+                      value={profileName}
+                      onChange={e => { setProfileName(e.target.value); if(profileErrors.name) setProfileErrors({...profileErrors, name: null}); }}
+                    />
+                    <User className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
+                  {profileErrors.name && <p className="text-red-500 text-xs mt-1 font-medium">{profileErrors.name}</p>}
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Email Address</label>
+                  <div className="relative">
+                    <input 
+                      className={`w-full p-3 pl-10 bg-slate-50 border ${profileErrors.email ? 'border-red-300' : 'border-slate-200'} rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none`}
+                      placeholder="you@example.com"
+                      value={profileEmail}
+                      onChange={e => { setProfileEmail(e.target.value); if(profileErrors.email) setProfileErrors({...profileErrors, email: null}); }}
+                    />
+                    <Mail className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
+                  {profileErrors.email && <p className="text-red-500 text-xs mt-1 font-medium">{profileErrors.email}</p>}
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Phone Number</label>
+                  <div className="relative">
+                    <input 
+                      className={`w-full p-3 pl-10 bg-slate-50 border ${profileErrors.phone ? 'border-red-300' : 'border-slate-200'} rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono`}
+                      placeholder="07XX XXX XXX"
+                      value={profilePhone}
+                      onChange={e => { setProfilePhone(e.target.value); if(profileErrors.phone) setProfileErrors({...profileErrors, phone: null}); }}
+                    />
+                    <Phone className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
+                  {profileErrors.phone && <p className="text-red-500 text-xs mt-1 font-medium">{profileErrors.phone}</p>}
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Location / Base</label>
+                  <div className="relative">
+                    <input 
+                      className={`w-full p-3 pl-10 bg-slate-50 border ${profileErrors.location ? 'border-red-300' : 'border-slate-200'} rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none`}
+                      placeholder="e.g. Nairobi, Kilimani"
+                      value={profileLocation}
+                      onChange={e => { setProfileLocation(e.target.value); if(profileErrors.location) setProfileErrors({...profileErrors, location: null}); }}
+                    />
+                    <MapPin className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  </div>
+                  {profileErrors.location && <p className="text-red-500 text-xs mt-1 font-medium">{profileErrors.location}</p>}
+                </div>
+
+                <div className="pt-2">
+                  <button 
+                    onClick={handleSaveProfile}
+                    className="w-full bg-slate-900 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-emerald-700 active:scale-[0.98] transition flex items-center justify-center gap-2"
+                  >
+                    <Save className="w-5 h-5" />
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {selectedTransaction && (
@@ -1503,7 +1674,7 @@ const App = () => {
           <Wallet className="w-6 h-6" />
           <span className="text-[10px] font-bold">Wallet</span>
         </button>
-        <button onClick={() => setSetupRequired(true)} className="p-3 rounded-2xl text-slate-400 hover:bg-slate-50 flex flex-col items-center gap-1">
+        <button onClick={() => setView('profile')} className={`p-3 rounded-2xl transition duration-300 flex flex-col items-center gap-1 ${view === 'profile' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-400 hover:bg-slate-50'}`}>
           <User className="w-6 h-6" />
           <span className="text-[10px] font-bold">Profile</span>
         </button>
