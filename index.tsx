@@ -70,6 +70,46 @@ interface Message {
   transaction_id: string;
 }
 
+// Simple onboarding tour flags
+const hasSeenTour = () => {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem('mkulima_tour_seen') === '1';
+};
+
+const setSeenTour = () => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem('mkulima_tour_seen', '1');
+};
+
+const useTourTargetRect = (targetId: string | null) => {
+  const [rect, setRect] = useState<DOMRect | null>(null);
+
+  useEffect(() => {
+    if (!targetId) {
+      setRect(null);
+      return;
+    }
+    const el = document.querySelector<HTMLElement>(`[data-tour-id="${targetId}"]`);
+    if (!el) {
+      setRect(null);
+      return;
+    }
+    const update = () => {
+      const r = el.getBoundingClientRect();
+      setRect(r);
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [targetId]);
+
+  return rect;
+};
+
 // SQL Setup Component
 const SetupRequired = () => {
   const [copied, setCopied] = useState(false);
@@ -1056,7 +1096,7 @@ const WalletView = ({ wallet, transactions, onTopUp, onWithdraw }: {
             </div>
             <div className="px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold text-white/80 backdrop-blur-sm border border-white/10">Active</div>
           </div>
-          <div className="text-4xl font-mono font-bold tracking-tighter text-white mb-6">KES {wallet?.balance.toLocaleString() ?? '...'}</div>
+          <div className="text-4xl font-mono font-bold tracking-tight text-white mb-6">KES {wallet?.balance.toLocaleString() ?? '...'}</div>
           <div className="flex gap-3">
             <button onClick={() => setActiveAction('topup')} className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
               <Plus className="w-4 h-4" /> Top Up
@@ -1171,12 +1211,15 @@ const App = () => {
   const [creating, setCreating] = useState(false);
   const [trendSort, setTrendSort] = useState<'price-desc' | 'price-asc' | 'name-asc'>('price-desc');
 
+  const [showTour, setShowTour] = useState(false);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session) {
         setRole(session.user.user_metadata.role || 'vendor');
         fetchData(session.user.id);
+        if (!hasSeenTour()) setShowTour(true);
       }
     });
 
@@ -1185,6 +1228,7 @@ const App = () => {
       if (session) {
         setRole(session.user.user_metadata.role || 'vendor');
         fetchData(session.user.id);
+        if (!hasSeenTour()) setShowTour(true);
       }
     });
 
@@ -1441,26 +1485,26 @@ const App = () => {
           <div className="space-y-6 animate-in fade-in duration-500">
              {/* Stats Card */}
              <div className="bg-gradient-to-br from-emerald-900 to-emerald-700 rounded-3xl p-6 text-white shadow-xl shadow-emerald-900/20 relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500 rounded-full mix-blend-overlay filter blur-3xl opacity-20 -translate-y-1/2 translate-x-1/2 group-hover:opacity-30 transition duration-700"></div>
-                <div className="absolute bottom-0 left-0 w-64 h-64 bg-blue-500 rounded-full mix-blend-overlay filter blur-3xl opacity-20 translate-y-1/2 -translate-x-1/2 group-hover:opacity-30 transition duration-700"></div>
+                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full mix-blend-overlay filter blur-3xl opacity-20 -translate-y-1/2 translate-x-1/2 group-hover:opacity-30 transition duration-700"></div>
+                <div className="absolute bottom-0 left-0 w-64 h-64 bg-blue-500/10 rounded-full mix-blend-overlay filter blur-3xl opacity-20 translate-y-1/2 -translate-x-1/2 group-hover:opacity-30 transition duration-700"></div>
                 
                 {/* Pattern overlay */}
                 <div className="absolute inset-0 opacity-10 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiNmZmYiLz48L3N2Zz4=')]"></div>
 
                 <div className="relative z-10">
                   <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center gap-2 text-emerald-200 text-xs font-bold uppercase tracking-wider">
+                    <div className="flex items-center gap-2 text-slate-300 text-xs font-bold uppercase tracking-wider">
                       <Wallet className="w-4 h-4" /> Wallet Balance
                     </div>
-                    <div className="px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold text-white/80 backdrop-blur-sm">KES Account</div>
+                    <div className="px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold text-white/80 backdrop-blur-sm border border-white/10">Active</div>
                   </div>
-                  <div className="text-4xl font-mono font-bold tracking-tighter text-white mb-6">KES {wallet?.balance.toLocaleString() ?? '...'}</div>
+                  <div className="text-4xl font-mono font-bold tracking-tight text-white mb-6">KES {wallet?.balance.toLocaleString() ?? '...'}</div>
                   <div className="flex gap-3">
-                    <button onClick={() => setActiveTab('wallet')} className="flex-1 bg-white text-emerald-900 px-4 py-3 rounded-xl text-sm font-bold shadow-lg shadow-black/10 hover:bg-emerald-50 transition active:scale-[0.98] flex items-center justify-center gap-2">
+                    <button onClick={() => setActiveAction('topup')} className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
                       <Plus className="w-4 h-4" /> Top Up
                     </button>
-                    <button onClick={() => setActiveTab('wallet')} className="flex-1 bg-emerald-800/50 border border-emerald-500/30 text-white px-4 py-3 rounded-xl text-sm font-bold backdrop-blur-md hover:bg-emerald-800/70 transition active:scale-[0.98]">
-                      View
+                    <button onClick={() => setActiveAction('withdraw')} className="flex-1 bg-white/10 border border-white/20 text-white px-4 py-3 rounded-xl text-sm font-bold backdrop-blur-md hover:bg-white/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
+                      <ArrowUpRight className="w-4 h-4" /> Withdraw
                     </button>
                   </div>
                 </div>
@@ -1537,7 +1581,7 @@ const App = () => {
                              </div>
                            </div>
                            <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-emerald-500 transition-colors" />
-                         </div>
+                        </div>
                        </div>
                      ))}
                    </div>
@@ -1983,9 +2027,173 @@ const App = () => {
           onUpdate={handleUpdateStatus}
         />
       )}
+
+      {/* Onboarding Tour */}
+      {!session?.user?.user_metadata?.has_seen_tour && (
+        <OnboardingTour onFinish={() => setSession(s => s && {...s, user: {...s.user, user_metadata: {...s.user.user_metadata, has_seen_tour: true}}})} />
+      )}
+      {showTour && <OnboardingTour onFinish={() => setShowTour(false)} />}
+    </div>
+  );
+};
+
+// Onboarding Tour Component with UI highlights
+const OnboardingTour = ({ onFinish }: { onFinish: () => void }) => {
+  const [step, setStep] = useState(0);
+
+  const steps: { id: string | null; title: string; body: string }[] = [
+    {
+      id: 'header',
+      title: 'Welcome to Mkulima Express',
+      body: 'This is your home for secure farmer–vendor trades with an escrow wallet.',
+    },
+    {
+      id: 'market',
+      title: 'Market: Discover Deals',
+      body: 'Here you will see listings from farmers and requests from vendors. This is where contracts usually start.',
+    },
+    {
+      id: 'create',
+      title: 'Create: Start a Contract',
+      body: 'Use this button to post a new listing (if you are a farmer) or a purchase request (if you are a vendor).',
+    },
+    {
+      id: 'wallet',
+      title: 'Wallet: Escrow Funds',
+      body: 'Your wallet holds money that can be locked into escrow for active contracts and released after delivery.',
+    },
+    {
+      id: 'dashboard',
+      title: 'Dashboard & Secure Chat',
+      body: 'Your active contracts live here. Open one to track the escrow timeline, chat privately with the other party, and manage disputes.',
+    },
+  ];
+
+  const current = steps[step];
+  const isLast = step === steps.length - 1;
+  const targetRect = useTourTargetRect(current.id);
+
+  const handleNext = () => {
+    if (isLast) {
+      setSeenTour();
+      onFinish();
+    } else {
+      setStep((s) => s + 1);
+    }
+  };
+
+  const handleSkip = () => {
+    setSeenTour();
+    onFinish();
+  };
+
+  // Simple padding around the highlight
+  const padding = 8;
+  const highlightStyle = targetRect
+    ? {
+        top: targetRect.top - padding,
+        left: targetRect.left - padding,
+        width: targetRect.width + padding * 2,
+        height: targetRect.height + padding * 2,
+      }
+    : null;
+
+  // Decide where to place tooltip: above or below target
+  const tooltipStyle = targetRect
+    ? {
+        top: Math.max(targetRect.bottom + 12, targetRect.top - 140) + window.scrollY,
+        left: Math.min(
+          Math.max(targetRect.left + targetRect.width / 2 - 160, 16),
+          window.innerWidth - 320
+        ),
+      }
+    : {
+        top: window.innerHeight / 2 - 120 + window.scrollY,
+        left: window.innerWidth / 2 - 160,
+      };
+
+  return (
+    <div className="fixed inset-0 z-[90] pointer-events-none">
+      {/* Dim background */}
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
+
+      {/* Highlight box */}
+      {highlightStyle && (
+        <div
+          className="absolute rounded-2xl ring-4 ring-emerald-400/70 bg-white/0 pointer-events-none transition-all duration-200"
+          style={highlightStyle}
+        />
+      )}
+
+      {/* Tooltip / content card */}
+      <div
+        className="absolute w-80 max-w-[90vw] bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 pointer-events-auto"
+        style={tooltipStyle}
+      >
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-emerald-600" />
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+              Escrow Tour
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleSkip}
+            className="text-slate-400 hover:text-slate-600"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <h2 className="text-sm font-bold text-slate-900 mb-1.5">{current.title}</h2>
+        <p className="text-xs text-slate-600 mb-4 leading-relaxed">{current.body}</p>
+        <div className="flex items-center justify-between mb-2">
+          <button
+            type="button"
+            onClick={handleSkip}
+            className="text-[11px] font-semibold text-slate-400 hover:text-slate-600"
+          >
+            Skip tour
+          </button>
+          <div className="flex gap-1">
+            {steps.map((_, i) => (
+              <div
+                key={i}
+                className={`h-1.5 w-4 rounded-full ${
+                  i <= step ? 'bg-emerald-500' : 'bg-slate-200'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleNext}
+          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py
+              <div
+                key={i}
+                className={`h-1.5 w-4 rounded-full ${
+                  i <= step ? 'bg-emerald-500' : 'bg-slate-200'
+                }`}
+              />
+            ))}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleNext}
+          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
+        >
+          {isLast ? 'Got it, start using app' : 'Next'}
+          {!isLast && <ChevronRight className="w-3.5 h-3.5" />}
+        </button>
+      </div>
     </div>
   );
 };
 
 const root = createRoot(document.getElementById('root')!);
+
+
+
 root.render(<App />);
