@@ -5,17 +5,26 @@ import QRCode from 'react-qr-code';
 import {
   Wallet, Leaf, CheckCircle, CreditCard,
   LogOut, Home, Store, Plus, User, Loader2, X,
-  TrendingUp, ArrowUpRight, ArrowDownRight, Package, Scale,
+  TrendingUp, Package, Scale,
   Clock, MapPin, Truck, ShieldCheck, AlertCircle, Search,
   ChevronRight, MessageSquare, Bell, ArrowDown, ArrowUp, Lock,
   SlidersHorizontal, Filter, Edit2, Save, Camera, ArrowUpDown,
-  ScanLine, QrCode, Send, Mail
+  ScanLine, QrCode, Send, Mail, HelpCircle, ShoppingBag, Megaphone,
+  List, Handshake, XCircle, Gavel, Info, AlertTriangle, Star, History,
+  Sparkles, MousePointerClick
 } from 'lucide-react';
 
 // Initialize Supabase Client
 const supabase = createClient(
   'https://riltljeipcaplvwtejaj.supabase.co',
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpbHRsamVpcGNhcGx2d3RlamFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2MTAzMzcsImV4cCI6MjA4MDE4NjMzN30.StgCRcE7brtSvTARLsfmWHXNQvPcyRl8WiPUNuY9v0Y'
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJpbHRsamVpcGNhcGx2d3RlamFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ2MTAzMzcsImV4cCI6MjA4MDE4NjMzN30.StgCRcE7brtSvTARLsfmWHXNQvPcyRl8WiPUNuY9v0Y',
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true
+    }
+  }
 );
 
 // Types
@@ -25,90 +34,21 @@ interface Transaction {
   title: string;
   amount: number;
   description: string;
-  status: string;
+  status: 'listed' | 'offer_made' | 'pending_deposit' | 'in_escrow' | 'shipped' | 'delivered' | 'completed' | 'disputed';
   vendor_id?: string;
   farmer_id?: string;
   vendor_email?: string;
   farmer_email?: string;
   delivery_pin?: string;
   category?: string;
-  quantity?: number;
-  location?: string;
-  offer_made_at?: string;
-  contract_formed_at?: string;
-  funds_deposited_at?: string;
-  shipped_at?: string;
-  delivered_at?: string;
-  completed_at?: string;
-  disputed_at?: string;
+  rating?: number;
+  review?: string;
 }
 
-interface WalletTransaction {
-  id: string;
-  created_at: string;
-  amount: number;
-  type: 'deposit' | 'withdrawal' | 'escrow_lock' | 'escrow_release' | 'payment_in';
-  description: string;
-  reference_id?: string;
+interface Wallet {
+  user_id: string;
+  balance: number;
 }
-
-interface Profile {
-  id: string;
-  display_name: string;
-  phone: string;
-  location: string;
-  bio: string;
-  updated_at?: string;
-}
-
-interface Message {
-  id: string;
-  created_at: string;
-  content: string;
-  sender_id: string;
-  sender_email?: string;
-  transaction_id: string;
-}
-
-// Simple onboarding tour flags
-const hasSeenTour = () => {
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem('mkulima_tour_seen') === '1';
-};
-
-const setSeenTour = () => {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem('mkulima_tour_seen', '1');
-};
-
-const useTourTargetRect = (targetId: string | null) => {
-  const [rect, setRect] = useState<DOMRect | null>(null);
-
-  useEffect(() => {
-    if (!targetId) {
-      setRect(null);
-      return;
-    }
-    const el = document.querySelector<HTMLElement>(`[data-tour-id="${targetId}"]`);
-    if (!el) {
-      setRect(null);
-      return;
-    }
-    const update = () => {
-      const r = el.getBoundingClientRect();
-      setRect(r);
-    };
-    update();
-    window.addEventListener('resize', update);
-    window.addEventListener('scroll', update, true);
-    return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update, true);
-    };
-  }, [targetId]);
-
-  return rect;
-};
 
 // SQL Setup Component
 const SetupRequired = () => {
@@ -122,28 +62,7 @@ create table if not exists public.wallets (
   updated_at timestamp with time zone default timezone('utc'::text, now())
 );
 
--- 2. Create Profiles Table
-create table if not exists public.profiles (
-  id uuid references auth.users(id) primary key,
-  display_name text,
-  phone text,
-  location text,
-  bio text,
-  updated_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 3. Create Wallet Transactions Table (History)
-create table if not exists public.wallet_transactions (
-  id uuid default gen_random_uuid() primary key,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  user_id uuid references auth.users(id) not null,
-  amount numeric not null,
-  type text not null,
-  reference_id uuid,
-  description text
-);
-
--- 4. Create Escrow Transactions Table
+-- 2. Create Escrow Transactions Table
 create table if not exists public.escrow_transactions (
   id uuid default gen_random_uuid() primary key,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -156,19 +75,12 @@ create table if not exists public.escrow_transactions (
   vendor_email text,
   farmer_email text,
   delivery_pin text default substring(md5(random()::text) from 0 for 7),
-  category text default 'Other',
-  quantity numeric default 0,
-  location text,
-  offer_made_at timestamp with time zone,
-  contract_formed_at timestamp with time zone,
-  funds_deposited_at timestamp with time zone,
-  shipped_at timestamp with time zone,
-  delivered_at timestamp with time zone,
-  completed_at timestamp with time zone,
-  disputed_at timestamp with time zone
+  category text default 'General',
+  rating numeric,
+  review text
 );
 
--- 5. Create Messages Table
+-- 3. Create Messages Table
 create table if not exists public.messages (
   id uuid default gen_random_uuid() primary key,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
@@ -178,44 +90,24 @@ create table if not exists public.messages (
   sender_email text
 );
 
--- 6. RLS Policies
+-- 4. Enable RLS
 alter table public.wallets enable row level security;
-alter table public.profiles enable row level security;
-alter table public.wallet_transactions enable row level security;
 alter table public.escrow_transactions enable row level security;
 alter table public.messages enable row level security;
 
--- Clear existing policies
+-- 5. Policies
 drop policy if exists "Access own wallet" on public.wallets;
-drop policy if exists "Public profiles" on public.profiles;
-drop policy if exists "Users can update own profile" on public.profiles;
-drop policy if exists "Users can insert own profile" on public.profiles;
-drop policy if exists "Access own wallet history" on public.wallet_transactions;
-drop policy if exists "View transactions" on public.escrow_transactions;
-drop policy if exists "Insert transactions" on public.escrow_transactions;
-drop policy if exists "Update transactions" on public.escrow_transactions;
-drop policy if exists "Access messages" on public.messages;
-drop policy if exists "View messages" on public.messages;
-drop policy if exists "Insert messages" on public.messages;
-
--- Wallets
 create policy "Access own wallet" on public.wallets for all using (auth.uid() = user_id);
 
--- Profiles
-create policy "Public profiles" on public.profiles for select using (true);
-create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
-create policy "Users can insert own profile" on public.profiles for insert with check (auth.uid() = id);
-
--- Wallet Transactions
-create policy "Access own wallet history" on public.wallet_transactions for all using (auth.uid() = user_id);
-
--- Escrow Transactions
+drop policy if exists "View transactions" on public.escrow_transactions;
 create policy "View transactions" on public.escrow_transactions for select
 using (vendor_id = auth.uid() or farmer_id = auth.uid() or status = 'listed');
 
+drop policy if exists "Insert transactions" on public.escrow_transactions;
 create policy "Insert transactions" on public.escrow_transactions for insert
 with check ((vendor_id = auth.uid()) or (farmer_id = auth.uid()));
 
+drop policy if exists "Update transactions" on public.escrow_transactions;
 create policy "Update transactions" on public.escrow_transactions for update
 using (
   vendor_id = auth.uid() or farmer_id = auth.uid() or 
@@ -223,13 +115,9 @@ using (
   (status = 'listed' and farmer_id is null)
 );
 
--- Messages
-create policy "View messages" on public.messages for select using (
+drop policy if exists "Access messages" on public.messages;
+create policy "Access messages" on public.messages for all using (
   exists (select 1 from public.escrow_transactions t where t.id = transaction_id and (t.vendor_id = auth.uid() or t.farmer_id = auth.uid()))
-);
-
-create policy "Insert messages" on public.messages for insert with check (
-  auth.uid() = sender_id
 );
 `;
 
@@ -241,73 +129,179 @@ create policy "Insert messages" on public.messages for insert with check (
 
   return (
     <div className="p-6 max-w-2xl mx-auto mt-10">
-      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xl">
-        <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 mb-4">
-          <ShieldCheck className="w-6 h-6 text-emerald-600" />
-          Database Update Required
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 shadow-sm">
+        <h2 className="text-xl font-bold text-amber-800 flex items-center gap-2 mb-4">
+          <ShieldCheck className="w-6 h-6" />
+          System Update Required
         </h2>
-        <p className="text-slate-600 mb-4 text-sm">
-          To enable user profiles and advanced filtering, please run this updated SQL in your Supabase SQL Editor.
+        <p className="text-amber-700 mb-4 text-sm leading-relaxed">
+          Please run this SQL in your Supabase dashboard to enable the Market visibility, ratings, and secure transaction features.
         </p>
-        <div className="relative">
-          <pre className="bg-slate-900 text-slate-50 p-4 rounded-lg text-xs overflow-auto h-64 font-mono">{sql}</pre>
+        <div className="relative group">
+          <pre className="bg-slate-900 text-slate-50 p-4 rounded-lg text-xs overflow-auto h-64 border border-slate-700 font-mono">{sql}</pre>
           <button 
             onClick={copySql}
-            className="absolute top-2 right-2 bg-white/10 hover:bg-white/20 text-white px-3 py-1 rounded text-xs font-bold transition"
+            className="absolute top-2 right-2 bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-md transition flex items-center gap-1 text-xs font-bold"
           >
+            {copied ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <Save className="w-4 h-4" />}
             {copied ? "Copied!" : "Copy SQL"}
           </button>
         </div>
-        <button onClick={() => window.location.reload()} className="mt-4 w-full bg-emerald-600 text-white py-3 rounded-lg font-bold">
-          I have run the SQL - Reload App
+        <button onClick={() => window.location.reload()} className="mt-6 w-full bg-amber-600 text-white py-3 rounded-lg font-semibold hover:bg-amber-700 transition shadow-md active:scale-[0.98]">
+          I've Run the SQL - Reload App
         </button>
       </div>
     </div>
   );
 };
 
-// Status Badge Component
-const StatusBadge = ({ status }: { status: string }) => {
-  const styles: Record<string, string> = {
-    listed: "bg-slate-100 text-slate-600 border-slate-200",
-    offer_made: "bg-purple-100 text-purple-700 border-purple-200",
-    pending_deposit: "bg-amber-100 text-amber-700 border-amber-200",
-    in_escrow: "bg-blue-100 text-blue-700 border-blue-200",
-    shipped: "bg-indigo-100 text-indigo-700 border-indigo-200",
-    delivered: "bg-teal-100 text-teal-700 border-teal-200",
-    completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
-    disputed: "bg-red-100 text-red-700 border-red-200"
+// Notification Toast
+const Notification = ({ message, type, onClose }: { message: string, type: 'success' | 'error' | 'info', onClose: () => void }) => {
+  useEffect(() => {
+    const timer = setTimeout(() => { onClose() }, 6000);
+    return () => clearTimeout(timer);
+  }, [onClose]);
+
+  const styles = {
+    success: 'bg-emerald-900 text-emerald-50 border-emerald-700/50',
+    error: 'bg-red-900 text-red-50 border-red-700/50',
+    info: 'bg-blue-900 text-blue-50 border-blue-700/50'
   };
-  const labels: Record<string, string> = {
-    listed: "Market Listed",
-    offer_made: "Offer Pending",
-    pending_deposit: "Awaiting Deposit",
-    in_escrow: "In Escrow",
-    shipped: "In Transit",
-    delivered: "Delivered",
-    completed: "Completed",
-    disputed: "Disputed"
+
+  const icons = {
+    success: <CheckCircle className="w-5 h-5" />,
+    error: <AlertCircle className="w-5 h-5" />,
+    info: <HelpCircle className="w-5 h-5" />
   };
+
+  const iconBg = {
+    success: 'bg-emerald-800',
+    error: 'bg-red-800',
+    info: 'bg-blue-800'
+  };
+
   return (
-    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border shadow-sm ${styles[status] || styles.listed}`}>
-      {labels[status] || status}
-    </span>
+    <div className={`fixed top-4 left-4 right-4 z-[100] flex items-center gap-3 p-4 rounded-xl shadow-2xl transition-all duration-500 animate-[slideIn_0.3s_ease-out] border ${styles[type]}`}>
+      <div className={`p-2 rounded-full shrink-0 ${iconBg[type]}`}>
+        {icons[type]}
+      </div>
+      <div className="flex-1">
+        <h4 className="font-bold text-sm mb-0.5 capitalize">{type}</h4>
+        <p className="text-xs font-medium opacity-90 leading-relaxed">{message}</p>
+      </div>
+      <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition shrink-0">
+        <X className="w-5 h-5 opacity-50" />
+      </button>
+    </div>
   );
 };
 
-// Auth Screen Component
-const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState("vendor");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+// Tour Component
+const Tour = ({ steps, currentStep, onNext, onClose }: { steps: any[], currentStep: number, onNext: () => void, onClose: () => void }) => {
+  const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+  const step = steps[currentStep];
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  useEffect(() => {
+    // Small delay to allow for view transitions/animations to finish
+    const timer = setTimeout(() => {
+      const el = document.querySelector(step.target);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        setTargetRect(rect);
+        el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      }
+    }, 400); // 400ms delay to wait for route/tab animation
+
+    const handleResize = () => {
+      const el = document.querySelector(step.target);
+      if(el) setTargetRect(el.getBoundingClientRect());
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timer);
+    };
+  }, [currentStep, step.target]);
+
+  if (!targetRect) return null;
+
+  // Calculate tooltip position
+  const isTop = targetRect.top > 300;
+  const tooltipTop = isTop ? targetRect.top - 180 : targetRect.bottom + 20;
+  
+  return (
+    <div className="fixed inset-0 z-[100] overflow-hidden">
+      {/* Background Mask using box-shadow trick to create a 'hole' */}
+      <div 
+        className="absolute transition-all duration-500 ease-in-out border-2 border-emerald-400 rounded-xl shadow-[0_0_0_9999px_rgba(0,0,0,0.85)]"
+        style={{
+          top: targetRect.top - 8,
+          left: targetRect.left - 8,
+          width: targetRect.width + 16,
+          height: targetRect.height + 16,
+        }}
+      >
+        {/* Pulse effect around the hole */}
+        <div className="absolute inset-0 -m-1 rounded-xl animate-ping border border-emerald-500/50" />
+        
+        {/* Pointer/Icon floating near the target */}
+        <div className={`absolute left-1/2 -translate-x-1/2 ${isTop ? '-bottom-12' : '-top-12'} text-white animate-bounce`}>
+          {isTop ? <ArrowUp className="w-8 h-8" /> : <ArrowDown className="w-8 h-8" />}
+        </div>
+      </div>
+
+      {/* Tooltip Card */}
+      <div 
+        className="absolute w-72 bg-white p-5 rounded-2xl shadow-2xl animate-in fade-in zoom-in duration-300 flex flex-col gap-3"
+        style={{
+          top: tooltipTop,
+          left: Math.max(16, Math.min(window.innerWidth - 304, targetRect.left + targetRect.width / 2 - 144))
+        }}
+      >
+        <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded-full">STEP {currentStep + 1}/{steps.length}</span>
+          </div>
+          <button onClick={onClose} className="text-slate-300 hover:text-slate-500 transition">
+            <X className="w-4 h-4"/>
+          </button>
+        </div>
+        
+        <div>
+          <h3 className="font-bold text-slate-800 text-lg leading-tight mb-1">{step.title}</h3>
+          <p className="text-sm text-slate-500 leading-relaxed">{step.content}</p>
+        </div>
+
+        <div className="flex justify-between items-center pt-2 mt-auto">
+           <button onClick={onClose} className="text-xs font-bold text-slate-400 hover:text-slate-600 px-2 py-1">Skip Tour</button>
+           <button 
+             onClick={onNext} 
+             className="bg-slate-900 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg hover:bg-emerald-600 transition flex items-center gap-2"
+           >
+             {currentStep === steps.length - 1 ? "Finish" : "Next"}
+             <ChevronRight className="w-4 h-4" />
+           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Login/Signup Component
+const Login = ({ onLogin }: { onLogin: () => void }) => {
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<'farmer' | 'vendor'>('vendor');
+  const [loading, setLoading] = useState(false);
+  const [notification, setNotification] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError(null);
+    setNotification(null);
+
     try {
       if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -316,910 +310,226 @@ const AuthScreen = ({ onLogin }: { onLogin: () => void }) => {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { role } }
+          options: {
+            data: { role },
+            emailRedirectTo: window.location.origin
+          }
         });
         if (error) throw error;
         if (data.user && !data.session) {
-          setError("Check email for verification link.");
+          setNotification({ message: "Account created! Check email to verify.", type: "success" });
+          setIsLogin(true);
           setLoading(false);
           return;
         }
       }
       onLogin();
     } catch (err: any) {
-      setError(err.message);
+      setNotification({ message: err.message, type: "error" });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-slate-100 flex items-center justify-center p-6">
-      <div className="bg-white w-full max-w-md p-8 rounded-3xl shadow-2xl shadow-emerald-900/10 border border-white/50 backdrop-blur-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-100 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 opacity-50"></div>
-        <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-100 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 opacity-50"></div>
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 relative">
+      {notification && <Notification {...notification} onClose={() => setNotification(null)} />}
+      
+      <div className="bg-white w-full max-w-md p-8 rounded-3xl shadow-xl shadow-slate-200/60 border border-slate-100 relative overflow-hidden">
+        {/* Background shapes */}
+        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-0 opacity-50" />
+        <div className="absolute bottom-0 left-0 w-24 h-24 bg-emerald-50 rounded-tr-full -z-0 opacity-50" />
 
-        <div className="relative z-10">
-          <div className="flex justify-center mb-6">
-            <div className="bg-emerald-600 p-4 rounded-2xl shadow-lg shadow-emerald-600/30">
-              <Leaf className="w-8 h-8 text-white" />
+        <div className="flex flex-col items-center mb-8 relative z-10">
+          <div className="w-20 h-20 bg-emerald-50 rounded-2xl flex items-center justify-center mb-5 shadow-sm border border-emerald-100 transform rotate-3 hover:rotate-0 transition duration-300 group">
+            <div className="relative">
+              <Leaf className="w-10 h-10 text-emerald-600 absolute -top-1 -left-1 opacity-20 group-hover:scale-110 transition" />
+              <Leaf className="w-10 h-10 text-emerald-700 relative z-10" />
             </div>
           </div>
-          
-          <h1 className="text-3xl font-extrabold text-slate-800 text-center mb-2 tracking-tight">Mkulima Express</h1>
-          <p className="text-slate-500 text-center mb-8 text-sm font-medium">Secure Escrow for Modern Agriculture</p>
-          
-          {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm mb-4 border border-red-100 flex items-center gap-2"><AlertCircle className="w-4 h-4"/>{error}</div>}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase ml-1">Email</label>
-              <input type="email" required className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition font-medium text-slate-800" value={email} onChange={e => setEmail(e.target.value)} placeholder="hello@example.com" />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase ml-1">Password</label>
-              <input type="password" required className="w-full p-4 bg-slate-50 rounded-xl border border-slate-200 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 outline-none transition font-medium text-slate-800" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
-            </div>
-
-            {!isLogin && (
-              <div className="grid grid-cols-2 gap-4 mt-2">
-                <button type="button" onClick={() => setRole('vendor')} className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all duration-200 ${role === 'vendor' ? 'border-emerald-500 bg-emerald-50 text-emerald-800 shadow-md scale-[1.02]' : 'border-slate-100 bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
-                  <Store className="w-6 h-6" /> <span className="font-bold text-sm">Vendor</span>
-                </button>
-                <button type="button" onClick={() => setRole('farmer')} className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all duration-200 ${role === 'farmer' ? 'border-emerald-500 bg-emerald-50 text-emerald-800 shadow-md scale-[1.02]' : 'border-slate-100 bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
-                  <Leaf className="w-6 h-6" /> <span className="font-bold text-sm">Farmer</span>
-                </button>
-              </div>
-            )}
-
-            <button disabled={loading} className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-4 rounded-xl font-bold text-lg shadow-xl shadow-emerald-700/20 transition-all active:scale-[0.98] flex justify-center items-center mt-6">
-              {loading ? <Loader2 className="animate-spin" /> : (isLogin ? "Sign In" : "Create Account")}
-            </button>
-          </form>
-          
-          <p className="text-center mt-8 text-slate-500 text-sm">
-            <button onClick={() => setIsLogin(!isLogin)} className="text-emerald-700 font-bold hover:underline">
-              {isLogin ? "New here? Create Account" : "Already have an account? Log In"}
-            </button>
-          </p>
+          <h1 className="text-3xl font-extrabold text-emerald-950 tracking-tight text-center">Mkulima Express</h1>
+          <p className="text-slate-500 text-center mt-2 font-medium text-sm">Trusted Escrow for Farmers & Vendors</p>
         </div>
+
+        <form onSubmit={handleAuth} className="space-y-5 relative z-10">
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 ml-1">Email Address</label>
+            <div className="relative">
+              <input
+                type="email"
+                required
+                className="w-full p-4 pl-12 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium text-slate-800"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+              />
+              <User className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 ml-1">Password</label>
+            <div className="relative">
+              <input
+                type="password"
+                required
+                className="w-full p-4 pl-12 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium text-slate-800"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+              <Lock className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+            </div>
+          </div>
+
+          {!isLogin && (
+            <div className="grid grid-cols-2 gap-4 mt-2 animate-in slide-in-from-top-2 duration-300">
+              <button
+                type="button"
+                onClick={() => setRole('vendor')}
+                className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition duration-200 active:scale-95 ${role === 'vendor' ? 'border-emerald-500 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-500' : 'border-slate-100 bg-white text-slate-400 hover:border-slate-200'}`}
+              >
+                <Store className="w-6 h-6" />
+                <span className="text-sm font-bold">Vendor</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRole('farmer')}
+                className={`p-4 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition duration-200 active:scale-95 ${role === 'farmer' ? 'border-emerald-500 bg-emerald-50 text-emerald-800 ring-1 ring-emerald-500' : 'border-slate-100 bg-white text-slate-400 hover:border-slate-200'}`}
+              >
+                <Leaf className="w-6 h-6" />
+                <span className="text-sm font-bold">Farmer</span>
+              </button>
+            </div>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-emerald-700/30 transition active:scale-[0.98] mt-4 flex items-center justify-center gap-2"
+          >
+            {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : (isLogin ? "Sign In" : "Create Account")}
+            {!loading && <ChevronRight className="w-5 h-5" />}
+          </button>
+        </form>
+
+        <p className="text-center mt-8 text-slate-500 text-sm relative z-10">
+          {isLogin ? "New to Mkulima Express? " : "Already have an account? "}
+          <button onClick={() => { setIsLogin(!isLogin); setNotification(null); }} className="text-emerald-700 font-bold hover:underline transition">
+            {isLogin ? "Create Account" : "Log In"}
+          </button>
+        </p>
       </div>
     </div>
   );
 };
 
-// Formatter
-const formatDate = (dateStr?: string) => {
-  if (!dateStr) return null;
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-  });
+// Status Badge Component
+const StatusBadge = ({ status }: { status: string }) => {
+  const styles: any = {
+    listed: 'bg-slate-100 text-slate-700 border-slate-200',
+    offer_made: 'bg-purple-50 text-purple-700 border-purple-200',
+    pending_deposit: 'bg-amber-50 text-amber-700 border-amber-200',
+    in_escrow: 'bg-blue-50 text-blue-700 border-blue-200',
+    shipped: 'bg-indigo-50 text-indigo-700 border-indigo-200',
+    delivered: 'bg-teal-50 text-teal-700 border-teal-200',
+    completed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    disputed: 'bg-red-50 text-red-700 border-red-200'
+  };
+
+  const labels: any = {
+    listed: 'Market Listed',
+    offer_made: 'Offer Received',
+    pending_deposit: 'Awaiting Deposit',
+    in_escrow: 'Secure in Escrow',
+    shipped: 'On The Way',
+    delivered: 'Delivered',
+    completed: 'Transaction Complete',
+    disputed: 'Under Dispute'
+  };
+
+  return (
+    <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${styles[status]}`}>
+      {labels[status]}
+    </span>
+  );
 };
 
-// Timeline Step Component
-interface TimelineStepProps {
-  title: string;
-  date?: string;
-  status: 'done' | 'current' | 'pending';
-  isLast?: boolean;
-}
-
-const TimelineStep: React.FC<TimelineStepProps> = ({ title, date, status, isLast }) => (
-  <div className="flex gap-4 group">
-    <div className="flex flex-col items-center">
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 z-10 border-2 transition-all duration-300 ${
-        status === 'done' ? 'bg-emerald-600 border-emerald-600 text-white shadow-md shadow-emerald-600/20' :
-        status === 'current' ? 'bg-white border-emerald-600 text-emerald-600 ring-4 ring-emerald-100 scale-110' :
-        'bg-slate-50 border-slate-200 text-slate-300'
-      }`}>
-        {status === 'done' ? <CheckCircle className="w-5 h-5" /> : status === 'current' ? <div className="w-3 h-3 bg-emerald-600 rounded-full animate-pulse" /> : <div className="w-2 h-2 bg-slate-300 rounded-full" />}
-      </div>
-      {!isLast && <div className={`w-0.5 flex-1 my-1 transition-colors duration-300 ${status === 'done' ? 'bg-emerald-500' : 'bg-slate-100'}`} />}
-    </div>
-    <div className={`pb-8 pt-1.5 ${status === 'pending' ? 'opacity-40 blur-[0.5px] transition-all group-hover:blur-0 group-hover:opacity-70' : 'opacity-100'}`}>
-      <h4 className={`font-bold text-sm ${status === 'current' ? 'text-emerald-800' : 'text-slate-700'}`}>{title}</h4>
-      {date && (
-        <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 font-medium">
-          <Clock className="w-3 h-3" />
-          {formatDate(date)}
+// Loading Screen Component
+const LoadingScreen = () => (
+  <div className="flex items-center justify-center min-h-screen bg-slate-50">
+    <div className="flex flex-col items-center gap-4">
+      <div className="relative">
+        <div className="absolute inset-0 bg-emerald-200 rounded-full animate-ping opacity-75" />
+        <div className="relative bg-white p-3 rounded-full shadow-lg">
+          <Loader2 className="w-8 h-8 text-emerald-600 animate-spin" />
         </div>
-      )}
+      </div>
+      <p className="text-slate-500 text-sm font-medium tracking-wide">Connecting to Mkulima Express...</p>
     </div>
   </div>
 );
 
-// Profile View Component
-const ProfileView = ({ profile, userRole, email, onUpdateProfile }: { 
-  profile: Profile | null, 
-  userRole: string,
-  email?: string,
-  onUpdateProfile: (p: Partial<Profile>) => Promise<void> 
-}) => {
-  const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState<Partial<Profile>>({});
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (profile) {
-      setFormData(profile);
-    }
-  }, [profile]);
-
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await onUpdateProfile(formData);
-      setIsEditing(false);
-    } catch (err) {
-      alert("Failed to save profile. Ensure the database table exists.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 text-center relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-24 bg-gradient-to-r from-emerald-600 to-teal-500"></div>
-        <div className="relative pt-8">
-          <div className="w-24 h-24 bg-white rounded-full p-1.5 mx-auto shadow-lg mb-4">
-            <div className="w-full h-full bg-slate-100 rounded-full flex items-center justify-center overflow-hidden relative group">
-              <User className="w-10 h-10 text-slate-400" />
-              {isEditing && (
-                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition cursor-pointer">
-                  <Camera className="w-6 h-6 text-white" />
-                </div>
-              )}
-            </div>
-          </div>
-          <h2 className="text-xl font-bold text-slate-800">{profile?.display_name || "Anonymous User"}</h2>
-          <p className="text-sm text-slate-500 font-medium">{email}</p>
-          <div className="flex justify-center gap-2 mt-3">
-            <span className="bg-emerald-100 text-emerald-800 px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border border-emerald-200">
-              {userRole}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="font-bold text-slate-800 text-lg">Personal Information</h3>
-          {!isEditing ? (
-            <button onClick={() => setIsEditing(true)} className="text-emerald-600 hover:bg-emerald-50 p-2 rounded-full transition">
-              <Edit2 className="w-5 h-5" />
-            </button>
-          ) : (
-            <button onClick={() => setIsEditing(false)} className="text-slate-400 hover:bg-slate-50 p-2 rounded-full transition">
-              <X className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-
-        {isEditing ? (
-          <form onSubmit={handleSave} className="space-y-4">
-            <div>
-                <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Email (Read Only)</label>
-                <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                    <input 
-                        className="w-full p-3 pl-10 bg-slate-100 border border-slate-200 rounded-xl text-slate-500 cursor-not-allowed"
-                        value={email || ''}
-                        disabled
-                    />
-                </div>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Display Name</label>
-              <input 
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-                value={formData.display_name || ''}
-                onChange={e => setFormData({...formData, display_name: e.target.value})}
-                placeholder="Your Name"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Phone Number</label>
-              <input 
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-                value={formData.phone || ''}
-                onChange={e => setFormData({...formData, phone: e.target.value})}
-                placeholder="+254..."
-              />
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Location</label>
-              <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <input 
-                  className="w-full p-3 pl-10 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
-                  value={formData.location || ''}
-                  onChange={e => setFormData({...formData, location: e.target.value})}
-                  placeholder="City, County"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Bio</label>
-              <textarea 
-                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none"
-                value={formData.bio || ''}
-                onChange={e => setFormData({...formData, bio: e.target.value})}
-                placeholder="Tell us about your farm or business..."
-              />
-            </div>
-            <button 
-              disabled={saving}
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-bold shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition flex items-center justify-center gap-2"
-            >
-              {saving ? <Loader2 className="animate-spin w-5 h-5" /> : <><Save className="w-5 h-5" /> Save Changes</>}
-            </button>
-          </form>
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 transition">
-              <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
-                <User className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase">Display Name</p>
-                <p className="font-medium text-slate-800">{profile?.display_name || "Not set"}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 transition">
-              <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
-                <User className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase">Phone</p>
-                <p className="font-medium text-slate-800">{profile?.phone || "Not set"}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-4 p-3 rounded-xl hover:bg-slate-50 transition">
-              <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
-                <MapPin className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase">Location</p>
-                <p className="font-medium text-slate-800">{profile?.location || "Not set"}</p>
-              </div>
-            </div>
-            <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 mt-2">
-              <p className="text-xs font-bold text-slate-400 uppercase mb-2">Bio</p>
-              <p className="text-sm text-slate-600 italic leading-relaxed">
-                {profile?.bio || "No bio added yet."}
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// Transaction Details Component
-const TransactionDetails = ({ 
-  transaction: t, 
-  role, 
-  userId,
-  userEmail,
-  onClose, 
-  onUpdate 
-}: { 
-  transaction: Transaction, 
-  role: string, 
-  userId: string, 
-  userEmail?: string,
-  onClose: () => void,
-  onUpdate: (txId: string, status: string, field: string) => void
-}) => {
-  const isBuyer = t.vendor_id === userId;
-  const isSeller = t.farmer_id === userId;
-  const [updating, setUpdating] = useState(false);
-  const [activeTab, setActiveTab] = useState('status'); // status, chat, logistics
-
-  // Chat State
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [newMessage, setNewMessage] = useState('');
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-
-  // Logistics State
-  const [deliveryPinInput, setDeliveryPinInput] = useState('');
-  const [showScannerMock, setShowScannerMock] = useState(false);
-
-  useEffect(() => {
-    // Scroll to bottom of chat
-    if (chatContainerRef.current) {
-        chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [messages, activeTab]);
-
-  useEffect(() => {
-    // Fetch Messages
-    const fetchMessages = async () => {
-        const { data } = await supabase.from('messages').select('*').eq('transaction_id', t.id).order('created_at', { ascending: true });
-        if (data) setMessages(data);
-    };
-    fetchMessages();
-
-    // Subscribe to new messages
-    const channel = supabase.channel(`tx_chat_${t.id}`)
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `transaction_id=eq.${t.id}` }, (payload) => {
-            const newMsg = payload.new as Message;
-            // Add message only if we don't have it (prevent duplicate from optimistic update)
-            setMessages(prev => {
-                if (prev.some(m => m.id === newMsg.id)) return prev;
-                return [...prev, newMsg];
-            });
-        })
-        .subscribe();
-
-    return () => {
-        supabase.removeChannel(channel);
-    }
-  }, [t.id]);
-  
-  const handleAction = async (newStatus: string, timestampField: string) => {
-    setUpdating(true);
-    await onUpdate(t.id, newStatus, timestampField);
-    setUpdating(false);
-  };
-
-  const handleSendMessage = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    const content = newMessage.trim();
-    if (!content) return;
-    
-    // 1. Optimistic Update (Immediate Feedback)
-    const tempId = Math.random().toString();
-    const optimisticMsg: Message = {
-        id: tempId,
-        created_at: new Date().toISOString(),
-        content: content,
-        sender_id: userId,
-        sender_email: userEmail,
-        transaction_id: t.id
-    };
-    setMessages(prev => [...prev, optimisticMsg]);
-    setNewMessage('');
-    
-    try {
-        // 2. Network Request
-        const { data, error } = await supabase.from('messages').insert({
-            transaction_id: t.id,
-            sender_id: userId,
-            sender_email: userEmail,
-            content: content
-        }).select().single();
-
-        if (error) throw error;
-
-        // 3. Replace Optimistic Message with Real One
-        if (data) {
-            setMessages(prev => prev.map(m => m.id === tempId ? data : m));
-        }
-    } catch (err) {
-        alert('Failed to send message');
-        // Revert optimistic update
-        setMessages(prev => prev.filter(m => m.id !== tempId));
-        setNewMessage(content);
-    }
-  };
-
-  const verifyDelivery = async () => {
-    if (deliveryPinInput === t.delivery_pin) {
-        await handleAction('delivered', 'delivered_at');
-    } else {
-        alert("Incorrect PIN. Delivery verification failed.");
-    }
-  };
-
-  const steps = [
-    { title: "Listed on Market", date: t.created_at, status: 'done' },
-    { title: "Offer Made", date: t.offer_made_at, status: t.offer_made_at ? 'done' : t.status === 'listed' ? 'pending' : 'done' },
-    { title: "Contract Formed", date: t.contract_formed_at, status: t.contract_formed_at ? 'done' : t.status === 'offer_made' ? 'current' : t.status === 'listed' ? 'pending' : 'done' },
-    { title: "Funds Secured in Escrow", date: t.funds_deposited_at, status: t.funds_deposited_at ? 'done' : t.status === 'pending_deposit' ? 'current' : ['listed', 'offer_made'].includes(t.status) ? 'pending' : 'done' },
-    { title: "Goods Shipped", date: t.shipped_at, status: t.shipped_at ? 'done' : t.status === 'in_escrow' ? 'current' : ['listed', 'offer_made', 'pending_deposit'].includes(t.status) ? 'pending' : 'done' },
-    { title: "Delivered", date: t.delivered_at, status: t.delivered_at ? 'done' : t.status === 'shipped' ? 'current' : ['listed', 'offer_made', 'pending_deposit', 'in_escrow'].includes(t.status) ? 'pending' : 'done' },
-    { title: "Funds Released (Complete)", date: t.completed_at, status: t.completed_at ? 'done' : t.status === 'delivered' ? 'current' : 'pending' }
-  ];
-
-  return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
-      <div className="bg-white w-full max-w-md max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 animate-in slide-in-from-bottom-10 duration-300">
-        {/* Header */}
-        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-20">
-          <div>
-            <h2 className="font-extrabold text-xl text-slate-800 leading-tight line-clamp-1">{t.title}</h2>
-            <div className="flex items-center gap-2 mt-1.5">
-              <StatusBadge status={t.status} />
-              <span className="text-xs text-slate-400 font-mono tracking-wide">#{t.id.slice(0,6)}</span>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-2 bg-slate-50 hover:bg-slate-100 rounded-full transition text-slate-500 hover:text-slate-800">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Dispute Banner */}
-        {t.status === 'disputed' && (
-          <div className="bg-red-50 px-5 py-3 border-b border-red-100 flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
-            <div>
-              <h3 className="text-sm font-bold text-red-700">Transaction Disputed</h3>
-              <p className="text-xs text-red-600/80 mt-0.5">Funds are frozen. Please use the chat to resolve the issue with the other party or request admin help.</p>
-            </div>
-          </div>
-        )}
-
-        {/* Tabs */}
-        <div className="flex border-b border-slate-100">
-          <button 
-            onClick={() => setActiveTab('status')}
-            className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'status' ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
-          >
-            Details
-          </button>
-          <button 
-            onClick={() => setActiveTab('chat')}
-            className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'chat' ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
-          >
-            Chat & Support
-          </button>
-          <button 
-            onClick={() => setActiveTab('logistics')}
-            className={`flex-1 py-3 text-sm font-bold border-b-2 transition-colors ${activeTab === 'logistics' ? 'border-emerald-600 text-emerald-800 bg-emerald-50/50' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
-          >
-            Logistics
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-0 scroll-smooth bg-slate-50">
-          {activeTab === 'status' && (
-            <>
-              {/* Info Card */}
-              <div className="p-5 bg-slate-50/50 border-b border-slate-100 space-y-4">
-                <div className="flex gap-3">
-                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex-1">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1"><CreditCard className="w-3 h-3"/> Amount</span>
-                    <div className="text-2xl font-mono font-bold text-emerald-700 tracking-tight">KES {t.amount.toLocaleString()}</div>
-                  </div>
-                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex-1">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1 mb-1"><Scale className="w-3 h-3"/> Quantity</span>
-                    <div className="text-2xl font-bold text-slate-700 tracking-tight">{t.quantity} <span className="text-sm font-normal text-slate-400">kg</span></div>
-                  </div>
-                </div>
-                {t.location && (
-                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-3">
-                    <div className="p-2 bg-slate-100 rounded-full text-slate-500">
-                      <MapPin className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Location</span>
-                      <p className="font-bold text-slate-700">{t.location}</p>
-                    </div>
-                  </div>
-                )}
-                <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Description</span>
-                  <p className="text-sm text-slate-600 leading-relaxed">{t.description || "No specific details provided."}</p>
-                </div>
-              </div>
-
-              {/* Timeline */}
-              <div className="p-6">
-                <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2 text-sm uppercase tracking-wider">
-                  <TrendingUp className="w-4 h-4 text-emerald-600" /> Transaction Timeline
-                </h3>
-                <div className="pl-2">
-                  {steps.map((step, idx) => (
-                    <TimelineStep 
-                      key={idx} 
-                      title={step.title}
-                      date={step.date}
-                      isLast={idx === steps.length - 1} 
-                      status={step.status as any} 
-                    />
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-
-          {activeTab === 'chat' && (
-            <div className="flex flex-col h-full bg-slate-50">
-              <div className="flex-1 p-4 space-y-3 overflow-y-auto" ref={chatContainerRef}>
-                <div className="text-center py-6">
-                  <div className="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-3 text-slate-400">
-                    <MessageSquare className="w-6 h-6" />
-                  </div>
-                  <p className="text-slate-500 text-sm font-bold">Secure Chat</p>
-                  <p className="text-slate-400 text-xs">Direct messages between Farmer & Vendor.</p>
-                </div>
-                
-                {messages.length === 0 && (
-                    <div className="text-center text-slate-400 text-xs py-4">No messages yet. Say hello!</div>
-                )}
-
-                {messages.map(msg => {
-                    const isMe = msg.sender_id === userId;
-                    return (
-                        <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`max-w-[80%] p-3 rounded-2xl text-sm shadow-sm ${isMe ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-white text-slate-700 rounded-tl-none border border-slate-200'}`}>
-                                <p>{msg.content}</p>
-                                <p className={`text-[10px] mt-1 ${isMe ? 'text-emerald-200' : 'text-slate-400'}`}>
-                                    {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                </p>
-                            </div>
-                        </div>
-                    )
-                })}
-              </div>
-              <form onSubmit={handleSendMessage} className="p-3 bg-white border-t border-slate-200 sticky bottom-0">
-                <div className="flex gap-2">
-                  <input 
-                    className="flex-1 bg-slate-100 border-transparent focus:bg-white focus:border-emerald-500 focus:ring-0 rounded-xl px-4 py-3 text-sm transition"
-                    placeholder="Type a message..."
-                    value={newMessage}
-                    onChange={e => setNewMessage(e.target.value)}
-                  />
-                  <button type="submit" disabled={!newMessage.trim()} className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white p-3 rounded-xl transition shadow-lg shadow-emerald-600/20">
-                    <Send className="w-5 h-5" />
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          {activeTab === 'logistics' && (
-            <div className="p-6 space-y-6">
-                {(isSeller || isBuyer) ? (
-                    <>
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 text-center">
-                            <h3 className="font-bold text-slate-800 mb-2">Delivery Verification</h3>
-                            <p className="text-slate-500 text-xs mb-6">Use the secure PIN to verify delivery upon arrival.</p>
-                            
-                            {isSeller && (
-                                <div className="flex flex-col items-center">
-                                    {(t.status === 'shipped' || t.status === 'delivered') ? (
-                                        <>
-                                            <div className="bg-white p-4 rounded-xl border-2 border-slate-900 mb-4 shadow-xl">
-                                                {t.delivery_pin ? <QRCode value={t.delivery_pin} size={150} /> : <div className="w-[150px] h-[150px] bg-slate-100 flex items-center justify-center text-xs text-slate-400">Error</div>}
-                                            </div>
-                                            <div className="bg-emerald-50 text-emerald-800 px-4 py-2 rounded-lg font-mono text-xl font-bold tracking-widest border border-emerald-100">
-                                                {t.delivery_pin}
-                                            </div>
-                                            <p className="text-xs text-slate-500 mt-4 max-w-xs mx-auto">
-                                                Allow the Vendor to scan this code or provide them the PIN upon delivery to release funds.
-                                            </p>
-                                        </>
-                                    ) : (
-                                        <div className="p-8 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 w-full">
-                                            <QrCode className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                                            <p className="text-sm text-slate-400">QR Code will appear when goods are Shipped.</p>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-
-                            {isBuyer && (
-                                <div>
-                                    {(t.status === 'shipped') ? (
-                                        <>
-                                            {showScannerMock ? (
-                                                <div className="relative aspect-square bg-black rounded-xl overflow-hidden mb-4 group cursor-pointer" onClick={() => setShowScannerMock(false)}>
-                                                    <div className="absolute inset-0 flex items-center justify-center">
-                                                        <div className="w-48 h-48 border-2 border-emerald-500 rounded-lg animate-pulse"></div>
-                                                    </div>
-                                                    <p className="absolute bottom-4 left-0 right-0 text-white text-xs font-bold">Simulating Camera...</p>
-                                                    <X className="absolute top-2 right-2 text-white w-6 h-6" />
-                                                </div>
-                                            ) : (
-                                                <button onClick={() => setShowScannerMock(true)} className="w-full py-8 mb-6 border-2 border-dashed border-emerald-200 bg-emerald-50/50 rounded-xl flex flex-col items-center justify-center gap-2 hover:bg-emerald-50 transition">
-                                                    <ScanLine className="w-8 h-8 text-emerald-600" />
-                                                    <span className="text-sm font-bold text-emerald-700">Scan Seller's QR Code</span>
-                                                </button>
-                                            )}
-                                            
-                                            <div className="relative">
-                                                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
-                                                <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-slate-400 font-bold">Or Enter PIN</span></div>
-                                            </div>
-
-                                            <div className="mt-4 flex gap-2">
-                                                <input 
-                                                    className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-center font-mono text-lg tracking-widest uppercase outline-none focus:ring-2 focus:ring-emerald-500"
-                                                    placeholder="PIN"
-                                                    maxLength={7}
-                                                    value={deliveryPinInput}
-                                                    onChange={e => setDeliveryPinInput(e.target.value)}
-                                                />
-                                                <button 
-                                                    onClick={verifyDelivery}
-                                                    className="bg-slate-900 text-white px-6 rounded-xl font-bold hover:bg-slate-800 transition"
-                                                >
-                                                    Verify
-                                                </button>
-                                            </div>
-                                        </>
-                                    ) : t.status === 'delivered' || t.status === 'completed' ? (
-                                        <div className="py-8">
-                                            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                                <CheckCircle className="w-8 h-8 text-emerald-600" />
-                                            </div>
-                                            <h4 className="font-bold text-emerald-800">Delivery Verified!</h4>
-                                            <p className="text-xs text-emerald-600 mt-1">Transaction is secured.</p>
-                                        </div>
-                                    ) : (
-                                        <p className="text-sm text-slate-400 italic">Waiting for shipment...</p>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                    </>
-                ) : (
-                    <div className="text-center py-10">
-                        <Lock className="w-12 h-12 text-slate-200 mx-auto mb-3" />
-                        <p className="text-slate-400 text-sm font-medium">Logistics information is only available to the Buyer and Seller.</p>
-                    </div>
-                )}
-            </div>
-          )}
-        </div>
-
-        {/* Actions Footer */}
-        {activeTab === 'status' && (
-          <div className="p-4 border-t border-slate-100 bg-white sticky bottom-0 z-20 pb-6">
-            {isSeller && t.status === 'offer_made' && (
-              <button 
-                onClick={() => handleAction('pending_deposit', 'contract_formed_at')}
-                disabled={updating}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
-              >
-                {updating ? <Loader2 className="animate-spin" /> : "Accept Offer & Form Contract"}
-              </button>
-            )}
-            
-            {isBuyer && t.status === 'pending_deposit' && (
-              <button 
-                onClick={() => handleAction('in_escrow', 'funds_deposited_at')}
-                disabled={updating}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
-              >
-                {updating ? <Loader2 className="animate-spin" /> : <><CreditCard className="w-5 h-5" /> Deposit Funds to Escrow</>}
-              </button>
-            )}
-
-            {isSeller && t.status === 'in_escrow' && (
-              <button 
-                onClick={() => handleAction('shipped', 'shipped_at')}
-                disabled={updating}
-                className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold hover:bg-indigo-700 transition flex justify-center items-center gap-2 shadow-lg shadow-indigo-600/20 active:scale-[0.98]"
-              >
-                {updating ? <Loader2 className="animate-spin" /> : <><Truck className="w-5 h-5" /> Mark as Shipped</>}
-              </button>
-            )}
-
-            {isBuyer && t.status === 'shipped' && (
-              <button 
-                onClick={() => setActiveTab('logistics')}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
-              >
-                <ScanLine className="w-5 h-5" /> Confirm Delivery via QR
-              </button>
-            )}
-
-            {isBuyer && t.status === 'delivered' && (
-              <button 
-                onClick={() => handleAction('completed', 'completed_at')}
-                disabled={updating}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg shadow-emerald-600/20 active:scale-[0.98]"
-              >
-                {updating ? <Loader2 className="animate-spin" /> : <><CheckCircle className="w-5 h-5" /> Release Funds to Farmer</>}
-              </button>
-            )}
-
-            {['pending_deposit', 'in_escrow', 'shipped', 'delivered'].includes(t.status) && !t.disputed_at && (
-              <button 
-                onClick={() => handleAction('disputed', 'disputed_at')}
-                disabled={updating}
-                className="mt-3 w-full bg-white text-red-500 border border-red-200 py-3 rounded-xl font-bold hover:bg-red-50 transition flex justify-center items-center gap-2 active:scale-[0.98]"
-              >
-                <AlertCircle className="w-5 h-5" /> Raise Dispute
-              </button>
-            )}
-
-            {t.status === 'disputed' && (
-                <div className="grid grid-cols-2 gap-3 mt-3">
-                    <button className="bg-slate-800 text-white py-3 rounded-xl font-bold text-xs">Request Admin</button>
-                    <button 
-                        onClick={() => handleAction(t.shipped_at ? 'shipped' : 'in_escrow', 'disputed_at')} 
-                        className="bg-emerald-100 text-emerald-700 py-3 rounded-xl font-bold text-xs"
-                    >
-                        Resolve Dispute
-                    </button>
-                </div>
-            )}
-            
-            {t.status === 'completed' && (
-              <div className="bg-emerald-50 text-emerald-800 text-center py-3 rounded-xl font-bold text-sm border border-emerald-100 flex items-center justify-center gap-2">
-                <CheckCircle className="w-5 h-5" /> Transaction Completed
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// Wallet View Component
-const WalletView = ({ wallet, transactions, onTopUp, onWithdraw }: { 
-  wallet: any, 
-  transactions: WalletTransaction[],
-  onTopUp: (amount: number) => Promise<void>,
-  onWithdraw: (amount: number, phone: string) => Promise<void>
-}) => {
-  const [activeAction, setActiveAction] = useState<'none' | 'topup' | 'withdraw'>('none');
-  const [amount, setAmount] = useState('');
-  const [phone, setPhone] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      if (activeAction === 'topup') await onTopUp(Number(amount));
-      if (activeAction === 'withdraw') await onWithdraw(Number(amount), phone);
-      setActiveAction('none');
-      setAmount('');
-      setPhone('');
-    } catch (err: any) {
-      alert(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Balance Card */}
-      <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-3xl p-6 text-white shadow-xl shadow-slate-900/20 relative overflow-hidden group">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-        <div className="absolute bottom-0 left-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
-        <div className="relative z-10">
-          <div className="flex justify-between items-start mb-2">
-            <div className="flex items-center gap-2 text-slate-300 text-xs font-bold uppercase tracking-wider">
-              <Wallet className="w-4 h-4" /> Total Balance
-            </div>
-            <div className="px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold text-white/80 backdrop-blur-sm border border-white/10">Active</div>
-          </div>
-          <div className="text-4xl font-mono font-bold tracking-tight text-white mb-6">KES {wallet?.balance.toLocaleString() ?? '...'}</div>
-          <div className="flex gap-3">
-            <button onClick={() => setActiveAction('topup')} className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
-              <Plus className="w-4 h-4" /> Top Up
-            </button>
-            <button onClick={() => setActiveAction('withdraw')} className="flex-1 bg-white/10 border border-white/20 text-white px-4 py-3 rounded-xl text-sm font-bold backdrop-blur-md hover:bg-white/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
-              <ArrowUpRight className="w-4 h-4" /> Withdraw
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Action Forms */}
-      {activeAction !== 'none' && (
-        <div className="bg-white p-6 rounded-2xl shadow-lg border border-slate-100 animate-in slide-in-from-top-2">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-slate-800">{activeAction === 'topup' ? 'Top Up Wallet' : 'Withdraw Funds'}</h3>
-            <button onClick={() => setActiveAction('none')} className="p-1 hover:bg-slate-100 rounded-full"><X className="w-4 h-4 text-slate-400" /></button>
-          </div>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="text-xs font-bold text-slate-500 uppercase ml-1">Amount (KES)</label>
-              <input type="number" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono font-medium" value={amount} onChange={e => setAmount(e.target.value)} placeholder="1000" />
-            </div>
-            {activeAction === 'withdraw' && (
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase ml-1">M-Pesa Number</label>
-                <input type="tel" required className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-medium" value={phone} onChange={e => setPhone(e.target.value)} placeholder="2547XXXXXXXX" />
-              </div>
-            )}
-            <button disabled={loading} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition flex justify-center items-center gap-2">
-              {loading ? <Loader2 className="animate-spin w-4 h-4" /> : "Confirm Transaction"}
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Transactions List */}
-      <div>
-        <h3 className="font-bold text-slate-800 mb-4 px-1">Transaction History</h3>
-        {transactions.length === 0 ? (
-          <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-200">
-            <p className="text-slate-400 text-sm">No transactions yet.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {transactions.map(tx => (
-              <div key={tx.id} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center gap-4">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                  tx.type === 'deposit' || tx.type === 'payment_in' ? 'bg-emerald-100 text-emerald-600' : 
-                  tx.type === 'escrow_lock' ? 'bg-amber-100 text-amber-600' : 'bg-slate-100 text-slate-500'
-                }`}>
-                  {tx.type === 'deposit' || tx.type === 'payment_in' ? <ArrowDown className="w-5 h-5" /> : 
-                   tx.type === 'escrow_lock' ? <Lock className="w-4 h-4" /> : <ArrowUp className="w-5 h-5" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-start">
-                    <h4 className="font-bold text-slate-700 text-sm truncate">{tx.description}</h4>
-                    <span className={`font-mono font-bold text-sm ${
-                      tx.type === 'deposit' || tx.type === 'payment_in' ? 'text-emerald-600' : 'text-slate-800'
-                    }`}>
-                      {tx.type === 'deposit' || tx.type === 'payment_in' ? '+' : '-'} {Math.abs(tx.amount).toLocaleString()}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center mt-1">
-                    <p className="text-xs text-slate-400 capitalize">{tx.type.replace('_', ' ')}</p>
-                    <p className="text-xs text-slate-400">{formatDate(tx.created_at)}</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
 // Main App Component
 const App = () => {
   const [session, setSession] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [wallet, setWallet] = useState<any>(null);
+  const [role, setRole] = useState<'farmer' | 'vendor'>('vendor');
+  const [loading, setLoading] = useState(true);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [walletTransactions, setWalletTransactions] = useState<WalletTransaction[]>([]);
-  const [dashboardFilter, setDashboardFilter] = useState('all');
-  const [activeTransactionId, setActiveTransactionId] = useState<string | null>(null);
-  const [role, setRole] = useState("vendor");
-  const [showSetup, setShowSetup] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [view, setView] = useState('dashboard');
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [wallet, setWallet] = useState<Wallet | null>(null);
+  const [selectedTxId, setSelectedTxId] = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState('All');
   
-  // Profile State
-  const [profile, setProfile] = useState<Profile | null>(null);
+  // Tour State
+  const [tourStepIndex, setTourStepIndex] = useState(-1);
 
-  // Advanced Filter State
-  const [showFilters, setShowFilters] = useState(false);
-  const [filters, setFilters] = useState({
-    category: 'All',
-    minPrice: '',
-    maxPrice: '',
-    location: ''
-  });
-  
   // Create Form State
-  const [createForm, setCreateForm] = useState({
-    title: '',
-    category: 'Maize',
-    quantity: '',
-    amount: '',
-    description: '',
-    location: ''
-  });
-  const [creating, setCreating] = useState(false);
-  const [trendSort, setTrendSort] = useState<'price-desc' | 'price-asc' | 'name-asc'>('price-desc');
+  const [newTitle, setNewTitle] = useState('');
+  const [newAmount, setNewAmount] = useState('');
+  const [newDesc, setNewDesc] = useState('');
+  const [newCategory, setNewCategory] = useState('Vegetables');
 
-  const [showTour, setShowTour] = useState(false);
+  const [notification, setNotification] = useState<{message: string, type: 'success' | 'error' | 'info'} | null>(null);
+
+  const marketTrends = [
+    { name: 'Maize (90kg)', price: 5500, change: 2.4, up: true },
+    { name: 'Red Onions', price: 120, change: 5.1, up: true },
+    { name: 'Tomatoes', price: 95, change: 1.2, up: false },
+    { name: 'Potatoes', price: 80, change: 0.5, up: true },
+    { name: 'Cabbage', price: 40, change: 3.0, up: false },
+    { name: 'Beans', price: 140, change: 1.8, up: true },
+    { name: 'Eggs (Tray)', price: 450, change: 0.8, up: true },
+    { name: 'Watermelon', price: 200, change: 4.2, up: false },
+    { name: 'Carrots', price: 65, change: 1.5, up: true },
+    { name: 'Kales', price: 30, change: 0.5, up: false },
+  ];
+
+  const tourSteps = [
+    { target: '#wallet-card', title: 'Smart Wallet', content: 'Check your balance, top up via M-Pesa, and see your earnings. Funds are held safely here during transactions.', view: 'dashboard' },
+    { target: '#nav-market', title: 'The Marketplace', content: 'Browse listings to buy produce or fulfill requests from other users.', view: 'market' },
+    { target: '#nav-create', title: 'Create Listing', content: 'Farmers can list produce for sale, and Vendors can post buying requests.', view: 'create' },
+    { target: '#nav-wallet', title: 'Transaction History', content: 'Track every deposit, escrow hold, and payout in your wallet history.', view: 'wallet' },
+    { target: '#nav-home', title: 'Home Dashboard', content: 'Return here anytime to see your active orders and quick status updates.', view: 'dashboard' }
+  ];
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Check current session
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error && error.message.includes('Refresh Token')) {
+        supabase.auth.signOut();
+        setSession(null);
+        setLoading(false);
+        return;
+      }
       setSession(session);
       if (session) {
         setRole(session.user.user_metadata.role || 'vendor');
-        fetchData(session.user.id);
-        if (!hasSeenTour()) setShowTour(true);
+        fetchTransactions();
+        fetchWallet(session.user.id);
+      } else {
+        setLoading(false);
       }
     });
 
@@ -1227,965 +537,975 @@ const App = () => {
       setSession(session);
       if (session) {
         setRole(session.user.user_metadata.role || 'vendor');
-        fetchData(session.user.id);
-        if (!hasSeenTour()) setShowTour(true);
+        fetchTransactions();
+        fetchWallet(session.user.id);
+      } else {
+        setLoading(false);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  const fetchData = async (userId: string) => {
-    // Explicitly select 'location' and 'delivery_pin' too
-    const { data: txs, error } = await supabase.from('escrow_transactions').select('*, funds_deposited_at, location, delivery_pin').order('created_at', { ascending: false });
+  // Real-time subscriptions
+  useEffect(() => {
+    if (!session) return;
+
+    // Listen for new messages
+    const msgSub = supabase
+      .channel('msg-notifications')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
+        const msg = payload.new as any;
+        if (msg.sender_id === session.user.id) return; // Don't notify own messages
+        
+        // Fetch transaction details to show title
+        const { data: tx } = await supabase.from('escrow_transactions').select('title, farmer_id, vendor_id').eq('id', msg.transaction_id).single();
+        if (tx && (tx.farmer_id === session.user.id || tx.vendor_id === session.user.id)) {
+          setNotification({ message: `New message in "${tx.title}"`, type: 'info' });
+        }
+      })
+      .subscribe();
+
+    // Listen for transaction status changes
+    const txSub = supabase
+      .channel('tx-notifications')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'escrow_transactions' }, (payload) => {
+        const newTx = payload.new as Transaction;
+        const oldTx = payload.old as Transaction;
+        
+        if (newTx.status === oldTx.status) return;
+
+        const isFarmer = newTx.farmer_id === session.user.id;
+        const isVendor = newTx.vendor_id === session.user.id;
+
+        if (!isFarmer && !isVendor) return;
+
+        let msg = '';
+        if (newTx.status === 'offer_made' && isFarmer) msg = `New Offer: Vendor wants "${newTx.title}"`;
+        else if (newTx.status === 'pending_deposit' && isVendor) msg = `Offer Accepted: Please fund "${newTx.title}"`;
+        else if (newTx.status === 'in_escrow' && isFarmer) msg = `Funded: Safe to ship "${newTx.title}"`;
+        else if (newTx.status === 'shipped' && isVendor) msg = `Shipped: "${newTx.title}" is on the way!`;
+        else if (newTx.status === 'delivered') msg = `Delivered: "${newTx.title}" has arrived.`;
+        else if (newTx.status === 'completed' && isFarmer) msg = `Paid: Funds released for "${newTx.title}"`;
+        else if (newTx.status === 'disputed') msg = `Alert: Dispute raised for "${newTx.title}"`;
+
+        if (msg) {
+          setNotification({ message: msg, type: newTx.status === 'disputed' ? 'error' : 'success' });
+          fetchTransactions(); // Refresh list
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(msgSub);
+      supabase.removeChannel(txSub);
+    };
+  }, [session]);
+
+  const fetchTransactions = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('escrow_transactions')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
     if (error) {
-        if (error.code === '42P01' || error.code === '42703' || error.message.includes('column') || error.message.includes('relation')) {
-            setShowSetup(true); // Table or Column missing
-        }
+      if (error.code === '42P01') { // Undefined table
+        setSetupRequired(true);
+      } else {
+        console.error(error);
+      }
     } else {
-        setTransactions(txs || []);
+      setTransactions(data || []);
     }
-    
-    // Fetch Profile
-    const { data: profileData, error: profileError } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    if (profileData) {
-      setProfile(profileData);
-    } else if (profileError && (profileError.code === '42P01' || profileError.message.includes('relation'))) {
-       setShowSetup(true);
-    } else {
-      setProfile({ id: userId, display_name: '', phone: '', location: '', bio: '' });
-    }
+    setLoading(false);
+  };
 
-    const { data: walletData } = await supabase.from('wallets').select('*').eq('user_id', userId).single();
-    if (walletData) setWallet(walletData);
-    else {
-      const { data: newWallet } = await supabase.from('wallets').insert([{ user_id: userId, balance: 0 }]).select().single();
+  const fetchWallet = async (userId: string) => {
+    const { data, error } = await supabase.from('wallets').select('*').eq('user_id', userId).single();
+    if (error && error.code === 'PGRST116') {
+      // Create wallet if not exists
+      const { data: newWallet, error: createError } = await supabase
+        .from('wallets')
+        .insert([{ user_id: userId, balance: 0 }])
+        .select()
+        .single();
       if (newWallet) setWallet(newWallet);
-    }
-
-    const { data: walletTx } = await supabase.from('wallet_transactions').select('*').eq('user_id', userId).order('created_at', { ascending: false });
-    setWalletTransactions(walletTx || []);
-  };
-
-  const handleUpdateProfile = async (updates: Partial<Profile>) => {
-    if (!session?.user) return;
-    try {
-      const { error } = await supabase.from('profiles').upsert({
-        id: session.user.id,
-        ...updates,
-        updated_at: new Date().toISOString()
-      });
-      if (error) throw error;
-      await fetchData(session.user.id);
-    } catch (err: any) {
-      throw err;
+    } else if (data) {
+      setWallet(data);
     }
   };
 
-  // Market Trends Calculation
-  const marketTrends = useMemo(() => {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-
-    const categories = ['Maize', 'Beans', 'Potatoes', 'Tomatoes', 'Onions', 'Rice', 'Bananas'];
-    
-    let trends = categories.map(cat => {
-      const catTxs = transactions.filter(t => 
-        t.category === cat && 
-        t.amount > 0 && 
-        (t.quantity || 0) > 0 &&
-        t.status !== 'disputed'
-      );
-
-      const calculateAvg = (txs: Transaction[]) => {
-        if (!txs.length) return 0;
-        const totalQty = txs.reduce((sum, t) => sum + Number(t.quantity), 0);
-        const totalAmt = txs.reduce((sum, t) => sum + Number(t.amount), 0);
-        return totalQty > 0 ? totalAmt / totalQty : 0;
-      };
-
-      const recentTxs = catTxs.filter(t => new Date(t.created_at) >= sevenDaysAgo);
-      const prevTxs = catTxs.filter(t => {
-        const d = new Date(t.created_at);
-        return d >= fourteenDaysAgo && d < sevenDaysAgo;
-      });
-
-      const currentAvg = calculateAvg(recentTxs);
-      const prevAvg = calculateAvg(prevTxs);
-
-      return {
-        name: cat,
-        price: currentAvg || prevAvg || 0,
-        change: prevAvg > 0 ? ((currentAvg - prevAvg) / prevAvg) * 100 : 0,
-        hasData: recentTxs.length > 0 || prevTxs.length > 0,
-        isUp: currentAvg >= prevAvg
-      };
-    }).filter(t => t.hasData);
-
-    return trends.sort((a, b) => {
-      if (trendSort === 'name-asc') return a.name.localeCompare(b.name);
-      if (trendSort === 'price-asc') return a.price - b.price;
-      return b.price - a.price;
-    });
-  }, [transactions, trendSort]);
-
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreateTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
-    setCreating(true);
-    try {
-      const isVendor = role === 'vendor';
-      const { error } = await supabase.from('escrow_transactions').insert({
-        title: createForm.title,
-        amount: Number(createForm.amount),
-        description: createForm.description,
-        category: createForm.category,
-        quantity: Number(createForm.quantity),
-        location: createForm.location,
-        vendor_id: isVendor ? session.user.id : null,
-        farmer_id: isVendor ? null : session.user.id,
-        vendor_email: isVendor ? session.user.email : null,
-        farmer_email: isVendor ? null : session.user.email,
-        status: 'listed'
-      });
+    if (!session) return;
 
-      if (error) throw error;
-      setCreateForm({ title: '', category: 'Maize', quantity: '', amount: '', description: '', location: '' });
-      setActiveTab('dashboard');
-      fetchData(session.user.id);
-    } catch (err: any) {
-      alert("Error creating listing: " + err.message);
-    } finally {
-      setCreating(false);
+    const isVendor = role === 'vendor';
+    const { error } = await supabase.from('escrow_transactions').insert({
+      title: newTitle,
+      amount: parseFloat(newAmount),
+      description: newDesc,
+      category: newCategory,
+      vendor_id: isVendor ? session.user.id : null,
+      farmer_id: isVendor ? null : session.user.id,
+      vendor_email: isVendor ? session.user.email : null,
+      farmer_email: isVendor ? null : session.user.email,
+      status: 'listed'
+    });
+
+    if (error) {
+      setNotification({ message: "Error creating transaction. Please try again.", type: "error" });
+    } else {
+      setNewTitle('');
+      setNewAmount('');
+      setNewDesc('');
+      setView('dashboard');
+      fetchTransactions();
+      setNotification({ message: "Listed successfully on the market!", type: "success" });
     }
   };
 
-  const handleClaim = async (txId: string) => {
-    try {
-      const timestamp = new Date().toISOString();
-      const updateData = role === 'vendor' 
-        ? { vendor_id: session.user.id, vendor_email: session.user.email, status: 'offer_made', offer_made_at: timestamp }
-        : { farmer_id: session.user.id, farmer_email: session.user.email, status: 'pending_deposit', contract_formed_at: timestamp };
+  const handleMakeOffer = async (txId: string) => {
+    if (!session || role !== 'vendor') return;
+    const { error } = await supabase
+      .from('escrow_transactions')
+      .update({ 
+        vendor_id: session.user.id,
+        vendor_email: session.user.email,
+        status: 'offer_made'
+      })
+      .eq('id', txId)
+      .eq('status', 'listed')
+      .is('vendor_id', null);
 
-      const { error } = await supabase.from('escrow_transactions').update(updateData).eq('id', txId);
-      if (error) throw error;
-      fetchData(session.user.id);
-      setActiveTab('dashboard');
-      setActiveTransactionId(txId); // Open details immediately
-    } catch (err: any) {
-      alert("Error claiming listing: " + err.message);
+    if (error) {
+      setNotification({ message: "Could not make offer. It may have been taken.", type: "error" });
+    } else {
+      fetchTransactions();
+      setSelectedTxId(txId);
+      setNotification({ message: "Offer sent to Farmer!", type: "success" });
     }
   };
 
-  const handleUpdateStatus = async (txId: string, newStatus: string, timestampField: string) => {
-    try {
-      const tx = transactions.find(t => t.id === txId);
-      if (!tx) throw new Error("Transaction not found");
+  const handleFulfillRequest = async (txId: string) => {
+    if (!session || role !== 'farmer') return;
+    const { error } = await supabase
+      .from('escrow_transactions')
+      .update({ 
+        farmer_id: session.user.id,
+        farmer_email: session.user.email,
+        status: 'pending_deposit'
+      })
+      .eq('id', txId)
+      .eq('status', 'listed')
+      .is('farmer_id', null);
 
-      // Financial Logic
-      if (newStatus === 'in_escrow' && tx.status === 'pending_deposit') {
-        if (!wallet || wallet.balance < tx.amount) {
-          throw new Error("Insufficient funds. Please top up your wallet.");
-        }
-        // Deduct from Vendor
-        await supabase.from('wallets').update({ balance: wallet.balance - tx.amount }).eq('user_id', session.user.id);
-        await supabase.from('wallet_transactions').insert({
-          user_id: session.user.id,
-          amount: -tx.amount,
-          type: 'escrow_lock',
-          description: `Escrow Lock for ${tx.title}`,
-          reference_id: txId
+    if (error) {
+      setNotification({ message: "Could not fulfill request. It may have been taken.", type: "error" });
+    } else {
+      fetchTransactions();
+      setSelectedTxId(txId);
+      setNotification({ message: "Order fulfilled! Waiting for deposit.", type: "success" });
+    }
+  };
+
+  const simulateMpesa = async () => {
+    if (!session) return;
+    const amount = 5000;
+    const phone = prompt("Enter your M-Pesa phone number (e.g. 2547XXXXXXXX):");
+    
+    if (phone) {
+      try {
+        const response = await fetch('http://localhost:4000/mpesa/stk-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount,
+            phoneNumber: phone,
+            accountReference: `WALLET_${session.user.id}`,
+            description: 'Mkulima Express wallet top up'
+          })
         });
-      }
-
-      if (newStatus === 'completed' && tx.status === 'delivered') {
-        // Release to Farmer
-        const { data: farmerWallet } = await supabase.from('wallets').select('*').eq('user_id', tx.farmer_id).single();
-        if (farmerWallet) {
-          await supabase.from('wallets').update({ balance: farmerWallet.balance + tx.amount }).eq('user_id', tx.farmer_id);
-          await supabase.from('wallet_transactions').insert({
-            user_id: tx.farmer_id,
-            amount: tx.amount,
-            type: 'payment_in',
-            description: `Payment Received for ${tx.title}`,
-            reference_id: txId
-          });
+        
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data?.error?.errorMessage || "Failed to initiate M-Pesa payment");
         }
+        setNotification({ message: "STK Push sent. Check your phone to approve payment.", type: "info" });
+      } catch (e: any) {
+        setNotification({ message: e.message || "Error starting M-Pesa payment", type: "error" });
       }
-
-      const updateData = { 
-        status: newStatus,
-        [timestampField]: new Date().toISOString()
-      };
-      const { error } = await supabase.from('escrow_transactions').update(updateData).eq('id', txId);
-      if (error) throw error;
-      fetchData(session.user.id);
-    } catch (err: any) {
-      alert("Error updating status: " + err.message);
     }
   };
 
-  const handleTopUp = async (amount: number) => {
-    // Simulating M-Pesa
-    const newBalance = (wallet?.balance || 0) + amount;
-    await supabase.from('wallets').update({ balance: newBalance }).eq('user_id', session.user.id);
-    await supabase.from('wallet_transactions').insert({
-      user_id: session.user.id,
-      amount: amount,
-      type: 'deposit',
-      description: 'M-Pesa Top Up'
-    });
-    fetchData(session.user.id);
-  };
+  const selectedTransaction = useMemo(() => 
+    transactions.find(t => t.id === selectedTxId), 
+  [transactions, selectedTxId]);
 
-  const handleWithdraw = async (amount: number, phone: string) => {
-    if ((wallet?.balance || 0) < amount) throw new Error("Insufficient balance");
-    const newBalance = wallet.balance - amount;
-    await supabase.from('wallets').update({ balance: newBalance }).eq('user_id', session.user.id);
-    await supabase.from('wallet_transactions').insert({
-      user_id: session.user.id,
-      amount: -amount,
-      type: 'withdrawal',
-      description: `Withdrawal to ${phone}`
-    });
-    fetchData(session.user.id);
-  };
+  if (loading) return <LoadingScreen />;
+  if (setupRequired) return <SetupRequired />;
+  if (!session) return <Login onLogin={() => {}} />;
 
-  if (!session) return <AuthScreen onLogin={() => {}} />;
-  if (showSetup) return <SetupRequired />;
+  const TransactionDetail = ({ transaction: t, onClose }: { transaction: Transaction, onClose: () => void }) => {
+    const [message, setMessage] = useState('');
+    const [messages, setMessages] = useState<any[]>([]);
+    const [tab, setTab] = useState<'info' | 'chat' | 'logistics'>('info');
+    const chatEndRef = useRef<HTMLDivElement>(null);
+    const [showScanner, setShowScanner] = useState(false);
+    const [pinInput, setPinInput] = useState('');
+    const [rating, setRating] = useState(0);
+    const [review, setReview] = useState('');
+    const [submittingRating, setSubmittingRating] = useState(false);
+
+    useEffect(() => {
+      // Load existing messages
+      (async () => {
+        const { data } = await supabase
+          .from('messages')
+          .select('*')
+          .eq('transaction_id', t.id)
+          .order('created_at', { ascending: true });
+        setMessages(data || []);
+      })();
+
+      // Subscribe to new messages
+      const sub = supabase
+        .channel('msgs')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `transaction_id=eq.${t.id}`}, (payload) => {
+          setMessages(prev => [...prev, payload.new]);
+        })
+        .subscribe();
+
+      return () => { supabase.removeChannel(sub); };
+    }, [t.id]);
+
+    useEffect(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages, tab]);
+
+    const sendMessage = async () => {
+      if (!message.trim()) return;
+      await supabase.from('messages').insert({
+        transaction_id: t.id,
+        sender_id: session.user.id,
+        sender_email: session.user.email,
+        content: message
+      });
+      setMessage('');
+    };
+
+    const updateStatus = async (newStatus: string, cancel: boolean = false) => {
+      // Logic for fund movements would go here in a real app (using RLS functions)
+      if (newStatus === 'in_escrow' && t.status === 'pending_deposit') {
+        if (!wallet || wallet.balance < t.amount) {
+          setNotification({ message: "Insufficient funds in wallet! Please top up.", type: "error" });
+          return;
+        }
+        // Deduct from wallet (simplified client-side logic for demo - secure apps use Postgres functions)
+        await supabase.from('wallets').update({ balance: wallet.balance - t.amount }).eq('user_id', session.user.id);
+      }
+
+      if (newStatus === 'completed' && t.status === 'delivered' && t.farmer_id) {
+        // Release funds
+        const { data: farmerWallet } = await supabase.from('wallets').select('balance').eq('user_id', t.farmer_id).single();
+        if (farmerWallet) {
+          await supabase.from('wallets').update({ balance: farmerWallet.balance + t.amount }).eq('user_id', t.farmer_id);
+        }
+      }
+
+      const updates: any = { status: newStatus };
+      if (cancel) {
+        updates.vendor_id = null;
+        updates.vendor_email = null;
+      }
+
+      const { error } = await supabase.from('escrow_transactions').update(updates).eq('id', t.id);
+      
+      if (error) {
+        setNotification({ message: "Failed to update status", type: "error" });
+      } else {
+        fetchTransactions();
+        fetchWallet(session.user.id);
+        if (newStatus === 'completed' || cancel) {
+          setNotification({ message: "Transaction updated successfully", type: "success" });
+          if(cancel) onClose();
+        }
+      }
+    };
+
+    const verifyDelivery = () => {
+      if (pinInput === t.delivery_pin) {
+        updateStatus('delivered');
+      } else {
+        setNotification({ message: "Invalid PIN code", type: "error" });
+      }
+    };
+
+    const submitRating = async () => {
+      if (rating === 0) return;
+      setSubmittingRating(true);
+      const { error } = await supabase.from('escrow_transactions').update({ rating, review }).eq('id', t.id);
+      if (error) {
+        setNotification({ message: "Failed to save rating.", type: "error" });
+      } else {
+        setNotification({ message: "Rating submitted!", type: "success" });
+        onClose();
+      }
+      setSubmittingRating(false);
+    };
+
+    const isFarmer = session.user.id === t.farmer_id;
+    const isVendor = session.user.id === t.vendor_id;
+    const isParticipant = isFarmer || isVendor;
+
+    return (
+      <div className="fixed inset-0 bg-slate-50 z-50 flex flex-col animate-in slide-in-from-bottom-10 duration-200">
+        <div className="bg-white px-4 py-4 border-b flex items-center gap-3 sticky top-0 z-10 shadow-sm">
+          <button onClick={onClose} className="p-2 -ml-2 hover:bg-slate-100 rounded-full">
+            <ChevronRight className="w-6 h-6 rotate-180 text-slate-600" />
+          </button>
+          <div className="flex-1">
+            <h2 className="font-bold text-slate-800 text-lg leading-tight">{t.title}</h2>
+            <p className="text-xs text-slate-500 font-mono">ID: {t.id.slice(0, 8)}</p>
+          </div>
+          <StatusBadge status={t.status} />
+        </div>
+
+        <div className="flex bg-white border-b">
+          <button onClick={() => setTab('info')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition ${tab === 'info' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-400'}`}>Details</button>
+          <button onClick={() => setTab('chat')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition ${tab === 'chat' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-400'}`}>Chat</button>
+          <button onClick={() => setTab('logistics')} className={`flex-1 py-3 text-sm font-semibold border-b-2 transition ${tab === 'logistics' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-400'}`}>Logistics</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto bg-slate-50 p-4">
+          {tab === 'info' && (
+            <div className="space-y-6">
+              <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Amount</span>
+                    <div className="text-3xl font-mono font-bold text-emerald-700 mt-1">KES {t.amount.toLocaleString()}</div>
+                  </div>
+                  {t.category && <span className="bg-slate-100 text-slate-600 text-[10px] px-2 py-1 rounded-full font-bold uppercase">{t.category}</span>}
+                </div>
+                
+                <div className="mt-4 pt-4 border-t border-slate-50">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">Description</span>
+                  <p className="text-slate-700 leading-relaxed">{t.description || "No description provided."}</p>
+                </div>
+
+                <div className="mt-4 flex gap-2">
+                  {isFarmer && <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-1 rounded-full font-bold">You are the Farmer</span>}
+                  {isVendor && <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-1 rounded-full font-bold">You are the Vendor</span>}
+                  {!isFarmer && !isVendor && <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-full font-bold">Read Only View</span>}
+                </div>
+              </div>
+
+              {t.status === 'completed' && !t.rating && isParticipant && (
+                <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 animate-in fade-in">
+                  <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2">
+                    <Star className="w-5 h-5 text-amber-400 fill-amber-400" />
+                    Rate this Transaction
+                  </h3>
+                  <p className="text-sm text-slate-500 mb-4">How was your experience with the other party?</p>
+                  <div className="flex justify-center gap-2 mb-4">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button key={star} onClick={() => setRating(star)} className="focus:outline-none transition transform hover:scale-110">
+                        <Star className={`w-8 h-8 ${rating >= star ? 'text-amber-400 fill-amber-400' : 'text-slate-200'}`} />
+                      </button>
+                    ))}
+                  </div>
+                  <textarea 
+                    className="w-full p-3 bg-slate-50 rounded-lg text-sm border border-slate-200 mb-3"
+                    placeholder="Optional review..."
+                    rows={2}
+                    value={review}
+                    onChange={(e) => setReview(e.target.value)}
+                  />
+                  <button 
+                    onClick={submitRating} 
+                    disabled={submittingRating || rating === 0}
+                    className="w-full bg-slate-800 text-white py-2 rounded-lg font-bold text-sm disabled:opacity-50"
+                  >
+                    {submittingRating ? 'Submitting...' : 'Submit Rating'}
+                  </button>
+                </div>
+              )}
+
+              {t.status === 'disputed' && (
+                <div className="bg-red-50 p-5 rounded-xl border border-red-200 flex items-start gap-3">
+                  <AlertTriangle className="w-6 h-6 text-red-600 shrink-0" />
+                  <div>
+                    <h3 className="font-bold text-red-800 text-sm">Transaction Disputed</h3>
+                    <p className="text-xs text-red-700 mt-1">An admin has been notified. Please use the chat to resolve the issue or wait for mediation.</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100">
+                <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-emerald-600" />
+                  Progress
+                </h3>
+                <div className="space-y-6 relative pl-2">
+                  <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-slate-100" />
+                  {[
+                    { s: 'listed', l: 'Listed on Market', done: true },
+                    { s: 'offer_made', l: 'Offer Received', done: t.status !== 'listed' },
+                    { s: 'pending_deposit', l: 'Contract Formed', done: ['pending_deposit', 'in_escrow', 'shipped', 'delivered', 'completed'].includes(t.status) },
+                    { s: 'in_escrow', l: 'Funds Secured', done: ['in_escrow', 'shipped', 'delivered', 'completed'].includes(t.status) },
+                    { s: 'shipped', l: 'Goods Shipped', done: ['shipped', 'delivered', 'completed'].includes(t.status) },
+                    { s: 'delivered', l: 'Delivered', done: ['delivered', 'completed'].includes(t.status) },
+                    { s: 'completed', l: 'Funds Released', done: t.status === 'completed' }
+                  ].map((step, i) => (
+                    <div key={i} className="relative flex items-center gap-3">
+                      <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center relative z-10 bg-white ${step.done ? 'border-emerald-500 text-emerald-500' : 'border-slate-200 text-slate-300'}`}>
+                        {step.done ? <CheckCircle className="w-4 h-4" /> : <div className="w-2 h-2 rounded-full bg-slate-200" />}
+                      </div>
+                      <span className={`text-sm font-medium ${step.done ? 'text-slate-800' : 'text-slate-400'}`}>{step.l}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {isParticipant && (
+                <div className="pb-8">
+                  {isFarmer && t.status === 'offer_made' && (
+                    <div className="space-y-3">
+                      <div className="bg-purple-50 p-4 rounded-xl border border-purple-200 mb-2">
+                        <p className="text-sm text-purple-800 font-medium text-center">
+                          A Vendor wants to buy this for <span className="font-bold">KES {t.amount.toLocaleString()}</span>.
+                        </p>
+                      </div>
+                      <button onClick={() => updateStatus('pending_deposit')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
+                        <Handshake className="w-5 h-5" /> Accept Offer
+                      </button>
+                      <button onClick={() => updateStatus('listed', true)} className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-xl font-bold hover:bg-slate-50 active:scale-95 transition flex items-center justify-center gap-2">
+                        <XCircle className="w-5 h-5" /> Reject Offer
+                      </button>
+                    </div>
+                  )}
+
+                  {isVendor && t.status === 'offer_made' && (
+                    <div className="bg-amber-50 p-4 rounded-xl text-amber-800 text-sm font-medium text-center border border-amber-200">
+                      Waiting for Farmer to accept your offer.
+                    </div>
+                  )}
+
+                  {isVendor && t.status === 'pending_deposit' && (
+                    <button onClick={() => updateStatus('in_escrow')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
+                      <Lock className="w-5 h-5" /> Deposit Funds (Escrow)
+                    </button>
+                  )}
+
+                  {isFarmer && t.status === 'pending_deposit' && (
+                    <div className="bg-blue-50 p-4 rounded-xl text-blue-800 text-sm font-medium text-center border border-blue-200">
+                      Waiting for Vendor to deposit funds.
+                    </div>
+                  )}
+
+                  {isFarmer && t.status === 'in_escrow' && (
+                    <button onClick={() => updateStatus('shipped')} className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition flex items-center justify-center gap-2">
+                      <Truck className="w-5 h-5" /> Mark as Shipped
+                    </button>
+                  )}
+
+                  {isVendor && t.status === 'delivered' && (
+                    <button onClick={() => updateStatus('completed')} className="w-full bg-emerald-600 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-200 hover:bg-emerald-700 active:scale-95 transition flex items-center justify-center gap-2">
+                      <CheckCircle className="w-5 h-5" /> Release Payment
+                    </button>
+                  )}
+
+                  {t.status !== 'completed' && t.status !== 'disputed' && t.status !== 'listed' && (
+                    <button onClick={() => updateStatus('disputed')} className="mt-4 w-full bg-white text-red-600 border border-red-100 py-3 rounded-xl font-semibold hover:bg-red-50 transition flex items-center justify-center gap-2">
+                      <Gavel className="w-4 h-4" /> Raise Dispute
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'chat' && (
+            <div className="flex flex-col h-full">
+              <div className="flex-1 space-y-4 mb-4" ref={chatEndRef}>
+                {messages.length === 0 && (
+                  <div className="text-center text-slate-400 mt-10 text-sm">No messages yet. Start discussing!</div>
+                )}
+                {messages.map(m => {
+                  const isMe = m.sender_id === session.user.id;
+                  return (
+                    <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${isMe ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}`}>
+                        {m.content}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2 bg-white p-2 rounded-full border border-slate-200 shadow-sm">
+                <input 
+                  className="flex-1 bg-transparent px-4 py-2 outline-none text-sm" 
+                  placeholder="Type a message..."
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                />
+                <button onClick={sendMessage} className="p-2 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 transition">
+                  <Send className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {tab === 'logistics' && (
+            <div className="space-y-6">
+              <div className="bg-white p-6 rounded-xl shadow-sm text-center border border-slate-100">
+                <h3 className="font-bold text-slate-800 mb-2">Delivery Verification</h3>
+                <p className="text-slate-500 text-sm mb-6">Use this QR code to securely verify delivery.</p>
+                
+                {isFarmer ? (
+                  (t.status === 'shipped' || t.status === 'delivered') ? (
+                    <div className="flex flex-col items-center">
+                      <div className="bg-white p-4 rounded-xl border-2 border-slate-900 mb-4">
+                        <QRCode value={t.delivery_pin || 'error'} size={180} />
+                      </div>
+                      <p className="text-xs font-mono text-slate-400">PIN: {t.delivery_pin}</p>
+                      <p className="text-sm font-medium text-emerald-700 mt-4 bg-emerald-50 px-4 py-2 rounded-lg">Show this to Vendor upon delivery</p>
+                    </div>
+                  ) : (
+                    <div className="p-8 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+                      <Truck className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                      <p className="text-sm text-slate-400">QR Code generates when marked as shipped.</p>
+                    </div>
+                  )
+                ) : isVendor ? (
+                  <div className="flex flex-col items-center">
+                    {showScanner ? (
+                      <div className="w-full rounded-xl overflow-hidden mb-4 relative bg-black h-64">
+                        <div className="absolute inset-0 flex items-center justify-center text-white text-xs">
+                          <p>Camera would open here in prod.</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <button onClick={() => setShowScanner(true)} className="mb-6 p-6 bg-slate-50 rounded-full border-2 border-emerald-100 hover:border-emerald-500 hover:bg-emerald-50 transition group">
+                        <ScanLine className="w-12 h-12 text-emerald-300 group-hover:text-emerald-600 transition" />
+                      </button>
+                    )}
+                    
+                    <div className="w-full">
+                      <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Or Enter PIN</label>
+                      <div className="flex gap-2">
+                        <input 
+                          value={pinInput}
+                          onChange={(e) => setPinInput(e.target.value)}
+                          placeholder="e.g. A7X29"
+                          className="flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl text-center font-mono tracking-widest uppercase outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                        <button onClick={verifyDelivery} className="px-6 bg-slate-800 text-white rounded-xl font-bold">
+                          Verify
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-slate-400 italic text-sm">Only the involved parties can access logistics.</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-slate-50/50 shadow-2xl overflow-hidden relative pb-24">
+    <div className="max-w-md mx-auto min-h-screen bg-slate-50 shadow-2xl overflow-hidden relative pb-20">
+      {notification && <Notification {...notification} onClose={() => setNotification(null)} />}
+      
+      <style>{`
+        @keyframes ticker {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        .animate-ticker {
+          animation: ticker 30s linear infinite;
+          width: max-content;
+        }
+        .animate-ticker:hover {
+          animation-play-state: paused;
+        }
+      `}</style>
+
       {/* Header */}
-      <div className="bg-white/80 backdrop-blur-md sticky top-0 z-30 px-5 py-4 border-b border-slate-200/60 flex justify-between items-center shadow-sm">
+      <div className="bg-white/80 backdrop-blur-md sticky top-0 z-30 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <div className="bg-emerald-600 p-2 rounded-xl shadow-md shadow-emerald-600/20"><Leaf className="w-5 h-5 text-white" /></div>
+          <div className="bg-emerald-100 p-2 rounded-lg">
+            <Leaf className="w-5 h-5 text-emerald-700" />
+          </div>
           <div>
-            <h1 className="font-extrabold text-slate-800 text-lg leading-none tracking-tight">Mkulima Express</h1>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{role}</p>
-            </div>
+            <h1 className="font-extrabold text-emerald-950 text-lg leading-none">Mkulima Express</h1>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{role}</p>
           </div>
         </div>
         <div className="flex gap-2">
-          <button className="p-2.5 text-slate-400 hover:text-slate-600 transition bg-slate-100/50 rounded-full hover:bg-slate-100">
-            <Bell className="w-5 h-5" />
+          <button onClick={() => setTourStepIndex(0)} className="p-2 text-emerald-600 hover:text-emerald-700 transition bg-emerald-50 rounded-full">
+            <HelpCircle className="w-5 h-5" />
           </button>
-          <button onClick={() => supabase.auth.signOut()} className="p-2.5 text-slate-400 hover:text-red-500 transition bg-slate-100/50 rounded-full hover:bg-red-50">
+          <button onClick={() => supabase.auth.signOut()} className="p-2 text-slate-400 hover:text-red-500 transition bg-slate-50 rounded-full">
             <LogOut className="w-5 h-5" />
           </button>
         </div>
       </div>
 
-      <div className="p-5 space-y-6">
-        {/* Dashboard View */}
-        {activeTab === 'dashboard' && (
-          <div className="space-y-6 animate-in fade-in duration-500">
-             {/* Stats Card */}
-             <div className="bg-gradient-to-br from-emerald-900 to-emerald-700 rounded-3xl p-6 text-white shadow-xl shadow-emerald-900/20 relative overflow-hidden group">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/10 rounded-full mix-blend-overlay filter blur-3xl opacity-20 -translate-y-1/2 translate-x-1/2 group-hover:opacity-30 transition duration-700"></div>
-                <div className="absolute bottom-0 left-0 w-64 h-64 bg-blue-500/10 rounded-full mix-blend-overlay filter blur-3xl opacity-20 translate-y-1/2 -translate-x-1/2 group-hover:opacity-30 transition duration-700"></div>
-                
-                {/* Pattern overlay */}
-                <div className="absolute inset-0 opacity-10 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMSIgY3k9IjEiIHI9IjEiIGZpbGw9IiNmZmYiLz48L3N2Zz4=')]"></div>
-
-                <div className="relative z-10">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center gap-2 text-slate-300 text-xs font-bold uppercase tracking-wider">
-                      <Wallet className="w-4 h-4" /> Wallet Balance
-                    </div>
-                    <div className="px-2 py-1 bg-white/10 rounded-lg text-[10px] font-bold text-white/80 backdrop-blur-sm border border-white/10">Active</div>
-                  </div>
-                  <div className="text-4xl font-mono font-bold tracking-tight text-white mb-6">KES {wallet?.balance.toLocaleString() ?? '...'}</div>
-                  <div className="flex gap-3">
-                    <button onClick={() => setActiveAction('topup')} className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-3 rounded-xl text-sm font-bold shadow-lg shadow-emerald-900/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
-                      <Plus className="w-4 h-4" /> Top Up
-                    </button>
-                    <button onClick={() => setActiveAction('withdraw')} className="flex-1 bg-white/10 border border-white/20 text-white px-4 py-3 rounded-xl text-sm font-bold backdrop-blur-md hover:bg-white/20 transition active:scale-[0.98] flex items-center justify-center gap-2">
-                      <ArrowUpRight className="w-4 h-4" /> Withdraw
-                    </button>
-                  </div>
+      {/* Content Area */}
+      <div className="p-4 space-y-4">
+        {view === 'dashboard' && (
+          <div className="space-y-4 animate-in fade-in duration-500">
+            {/* Wallet Card */}
+            <div id="wallet-card" className="bg-gradient-to-br from-emerald-800 to-emerald-600 rounded-2xl p-6 text-white shadow-xl shadow-emerald-700/20 relative overflow-hidden">
+              <div className="absolute -right-4 -bottom-4 bg-white/10 w-32 h-32 rounded-full blur-2xl" />
+              <div className="relative z-10">
+                <div className="flex items-center gap-2 text-emerald-200 mb-1 text-sm font-medium">
+                  <Wallet className="w-4 h-4" /> Wallet Balance
                 </div>
-             </div>
+                <div className="text-3xl font-mono font-bold tracking-tight">
+                  KES {wallet?.balance.toLocaleString() ?? '...'}
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <button onClick={() => setView('wallet')} className="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-xs font-bold backdrop-blur-sm transition">
+                    Top Up
+                  </button>
+                  <button className="bg-white/20 hover:bg-white/30 px-4 py-2 rounded-lg text-xs font-bold backdrop-blur-sm transition">
+                    Withdraw
+                  </button>
+                </div>
+              </div>
+            </div>
 
-             {/* Recent Activity */}
-             <div>
-               <div className="flex justify-between items-end mb-4 px-1">
-                 <h2 className="font-bold text-slate-800 text-lg">Your Activity</h2>
-                 
-                 {/* Filter Chips */}
-                 <div className="flex bg-slate-200/50 p-1 rounded-xl">
-                    {['all', 'active', 'completed'].map(f => (
-                      <button 
-                        key={f}
-                        onClick={() => setDashboardFilter(f as any)}
-                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold capitalize transition-all ${
-                          dashboardFilter === f 
-                            ? 'bg-white text-slate-800 shadow-sm' 
-                            : 'text-slate-500 hover:text-slate-700'
-                        }`}
-                      >
-                        {f}
-                      </button>
-                    ))}
-                 </div>
-               </div>
-
-               {/* Filter Logic & List */}
-               {(() => {
-                 const myTxs = transactions.filter(t => t.farmer_id === session.user.id || t.vendor_id === session.user.id);
-                 const filteredTxs = myTxs.filter(t => {
-                    if (dashboardFilter === 'all') return true;
-                    if (dashboardFilter === 'completed') return t.status === 'completed';
-                    if (dashboardFilter === 'active') return !['completed', 'disputed'].includes(t.status);
-                    return true;
-                 });
-
-                 if (filteredTxs.length === 0) {
-                   return (
-                     <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200">
-                       <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                         <Leaf className="w-8 h-8 text-slate-300" />
-                       </div>
-                       <p className="text-slate-500 text-sm font-medium">No {dashboardFilter === 'all' ? '' : dashboardFilter} transactions found.</p>
-                       <button onClick={() => setActiveTab('create')} className="mt-4 px-5 py-2 bg-emerald-50 text-emerald-700 font-bold text-xs rounded-full hover:bg-emerald-100 transition">
-                         Start New Transaction
-                       </button>
-                     </div>
-                   );
-                 }
-
-                 return (
-                   <div className="space-y-3">
-                     {filteredTxs.map(t => (
-                       <div key={t.id} onClick={() => setActiveTransactionId(t.id)} className="group bg-white p-4 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer active:scale-[0.99] relative overflow-hidden">
-                         <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${
-                           t.status === 'completed' ? 'bg-emerald-500' : 
-                           t.status === 'disputed' ? 'bg-red-500' :
-                           'bg-amber-500'
-                         }`}></div>
-                         <div className="flex items-center gap-4 pl-2">
-                           <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-inner ${t.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                             {t.status === 'completed' ? <CheckCircle className="w-6 h-6" /> : <CreditCard className="w-6 h-6" />}
-                           </div>
-                           <div className="flex-1 min-w-0">
-                             <div className="flex justify-between items-start mb-1">
-                                <h3 className="font-bold text-slate-800 truncate pr-2 group-hover:text-emerald-700 transition-colors">{t.title}</h3>
-                                <span className="text-emerald-700 font-mono font-bold text-sm whitespace-nowrap">KES {t.amount.toLocaleString()}</span>
-                             </div>
-                             <div className="flex justify-between items-center">
-                                <p className="text-xs text-slate-400 truncate max-w-[120px] font-medium">{t.created_at.slice(0, 10)}</p>
-                                <StatusBadge status={t.status} />
-                             </div>
-                           </div>
-                           <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-emerald-500 transition-colors" />
+            {/* Active Transactions */}
+            <div>
+              <div className="flex justify-between items-center mb-3 px-1">
+                <h2 className="font-bold text-slate-800">Your Activity</h2>
+                <span className="text-xs text-emerald-600 font-semibold cursor-pointer">View All</span>
+              </div>
+              
+              {transactions.filter(t => t.farmer_id === session.user.id || t.vendor_id === session.user.id).length === 0 ? (
+                <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-300">
+                  <Leaf className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                  <p className="text-slate-500 text-sm">No transactions yet.</p>
+                  <button onClick={() => setView('create')} className="mt-3 text-emerald-700 font-bold text-sm hover:underline">
+                    Start New
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {transactions.filter(t => t.farmer_id === session.user.id || t.vendor_id === session.user.id).map(t => (
+                    <div key={t.id} onClick={() => setSelectedTxId(t.id)} className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm flex items-center gap-4 hover:shadow-md transition cursor-pointer active:scale-[0.99]">
+                      <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${t.status === 'completed' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                        {t.status === 'completed' ? <CheckCircle className="w-6 h-6" /> : <CreditCard className="w-6 h-6" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-start mb-1">
+                          <h3 className="font-bold text-slate-800 truncate pr-2">{t.title}</h3>
+                          <span className="text-emerald-700 font-mono font-bold text-sm whitespace-nowrap">KES {t.amount.toLocaleString()}</span>
                         </div>
-                       </div>
-                     ))}
-                   </div>
-                 );
-               })()}
-             </div>
+                        <div className="flex justify-between items-center">
+                          <p className="text-xs text-slate-400 truncate max-w-[120px]">{t.created_at.slice(0, 10)}</p>
+                          <StatusBadge status={t.status} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        {/* Market View */}
-        {activeTab === 'market' && (
-          <div className="space-y-8 animate-in fade-in duration-500">
-            {/* Search Bar & Filter Toggle */}
-            <div className="relative sticky top-0 z-10 pt-2 -mt-2 bg-slate-50/50 backdrop-blur-sm pb-2">
-               <div className="flex gap-2">
-                 <div className="relative flex-1">
-                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                    <input
-                      className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl shadow-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium text-slate-700 placeholder:text-slate-400"
-                      placeholder="Search produce..."
-                      value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                    />
-                 </div>
-                 <button 
-                   onClick={() => setShowFilters(!showFilters)}
-                   className={`p-4 rounded-2xl border transition-all shadow-sm ${showFilters ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-white border-slate-200 text-slate-500 hover:text-emerald-600'}`}
-                 >
-                   <SlidersHorizontal className="w-6 h-6" />
-                 </button>
-               </div>
-
-               {/* Advanced Filters Panel */}
-               {showFilters && (
-                 <div className="mt-2 bg-white p-4 rounded-2xl border border-slate-200 shadow-md animate-in slide-in-from-top-2">
-                   <div className="flex justify-between items-center mb-3">
-                     <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                       <Filter className="w-4 h-4 text-emerald-600" /> Filters
-                     </h3>
-                     <button onClick={() => setFilters({category: 'All', minPrice: '', maxPrice: '', location: ''})} className="text-[10px] font-bold text-slate-400 hover:text-red-500">
-                       Clear All
-                     </button>
-                   </div>
-                   
-                   <div className="space-y-3">
-                     {/* Category */}
-                     <div>
-                       <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">Category</label>
-                       <select 
-                         className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-emerald-500"
-                         value={filters.category}
-                         onChange={e => setFilters({...filters, category: e.target.value})}
-                       >
-                         <option value="All">All Categories</option>
-                         {['Maize', 'Beans', 'Potatoes', 'Tomatoes', 'Onions', 'Rice', 'Bananas', 'Other'].map(c => (
-                           <option key={c} value={c}>{c}</option>
-                         ))}
-                       </select>
-                     </div>
-
-                     {/* Price Range */}
-                     <div>
-                       <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">Price Range (KES)</label>
-                       <div className="flex gap-2">
-                         <input 
-                           type="number" 
-                           placeholder="Min" 
-                           className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-emerald-500"
-                           value={filters.minPrice}
-                           onChange={e => setFilters({...filters, minPrice: e.target.value})}
-                         />
-                         <input 
-                           type="number" 
-                           placeholder="Max" 
-                           className="flex-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-emerald-500"
-                           value={filters.maxPrice}
-                           onChange={e => setFilters({...filters, maxPrice: e.target.value})}
-                         />
-                       </div>
-                     </div>
-
-                     {/* Location */}
-                     <div>
-                       <label className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 block">Location</label>
-                       <div className="relative">
-                         <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                         <input 
-                           placeholder="e.g. Nairobi, Nakuru" 
-                           className="w-full p-2.5 pl-9 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 outline-none focus:border-emerald-500"
-                           value={filters.location}
-                           onChange={e => setFilters({...filters, location: e.target.value})}
-                         />
-                       </div>
-                     </div>
-                   </div>
-                 </div>
-               )}
-            </div>
-
+        {view === 'market' && (
+          <div className="animate-in fade-in duration-500 space-y-4">
             {/* Market Trends Section */}
-            {!showFilters && (
-              <div>
-                <style>{`
-                  @keyframes ticker {
-                    0% { transform: translateX(0); }
-                    100% { transform: translateX(-50%); }
-                  }
-                  .animate-ticker {
-                    animation: ticker 40s linear infinite;
-                    width: max-content;
-                    display: flex;
-                  }
-                  .animate-ticker:hover {
-                    animation-play-state: paused;
-                  }
-                `}</style>
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <div className="bg-slate-900 p-1.5 rounded-lg">
-                      <TrendingUp className="w-4 h-4 text-white" />
-                    </div>
-                    <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">Rolling 7-Day Trends</h2>
-                  </div>
-                  
-                  {marketTrends.length > 0 && (
-                    <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-sm">
-                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
-                      <select 
-                        value={trendSort} 
-                        onChange={(e) => setTrendSort(e.target.value as any)}
-                        className="text-[10px] font-bold text-slate-600 bg-transparent border-none outline-none cursor-pointer hover:text-emerald-700 transition appearance-none pr-1"
-                      >
-                        <option value="price-desc">Highest Price</option>
-                        <option value="price-asc">Lowest Price</option>
-                        <option value="name-asc">Name (A-Z)</option>
-                      </select>
-                    </div>
-                  )}
-                </div>
-                
-                {marketTrends.length > 0 ? (
-                  <div className="relative overflow-hidden w-full -mx-5 px-5 py-2">
-                    {/* Gradient Masks */}
-                    <div className="absolute left-0 top-0 bottom-0 w-12 z-10 bg-gradient-to-r from-slate-50 to-transparent pointer-events-none"></div>
-                    <div className="absolute right-0 top-0 bottom-0 w-12 z-10 bg-gradient-to-l from-slate-50 to-transparent pointer-events-none"></div>
-                    
-                    <div className="flex animate-ticker">
-                      {/* Render double the items for seamless looping. Using margin instead of gap for perfect -50% offset calculation. */}
-                      {[...marketTrends, ...marketTrends].map((item, idx) => (
-                        <div key={`${item.name}-${idx}`} className="mr-4 min-w-[160px] bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col hover:shadow-md transition-shadow relative overflow-hidden group">
-                          <div className={`absolute top-0 right-0 w-16 h-16 rounded-bl-full opacity-10 transition-colors ${item.isUp ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
-                          <span className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wider">{item.name}</span>
-                          <div className="flex items-baseline gap-1 mt-auto">
-                            <span className="text-2xl font-extrabold text-slate-800 tracking-tight">KES {item.price.toFixed(0)}</span>
-                            <span className="text-[10px] text-slate-400 font-medium">/kg</span>
-                          </div>
-                          <div className={`mt-2 flex items-center gap-1.5 text-[11px] font-bold ${item.isUp ? 'text-emerald-700 bg-emerald-50 border-emerald-100' : 'text-red-700 bg-red-50 border-red-100'} w-fit px-2.5 py-1 rounded-lg border`}>
-                            {item.isUp ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                            {Math.abs(item.change).toFixed(1)}%
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-white p-6 rounded-2xl border border-slate-100 text-center shadow-sm">
-                    <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <Scale className="w-6 h-6 text-slate-300" />
-                    </div>
-                    <p className="text-xs text-slate-500 font-medium">Not enough data to calculate market trends yet.</p>
-                  </div>
-                )}
+            <div className="bg-white p-4 rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+              <div className="flex justify-between items-center mb-3 px-1">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  Market Trends (Avg Price)
+                </h3>
+                <span className="text-[10px] text-slate-400">Live Updates</span>
               </div>
-            )}
-
-            {/* Active Listings */}
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <div className="bg-slate-900 p-1.5 rounded-lg">
-                  <Package className="w-4 h-4 text-white" />
-                </div>
-                <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wide">
-                  {showFilters ? 'Filtered Listings' : 'Recent Listings'}
-                </h2>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4">
-                {(() => {
-                  const filteredListings = transactions.filter(t => 
-                    t.status === 'listed' && (
-                      // Search Query Filter
-                      (searchQuery === '' || 
-                        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        (t.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        (t.category || '').toLowerCase().includes(searchQuery.toLowerCase())
-                      ) &&
-                      // Category Filter
-                      (filters.category === 'All' || t.category === filters.category) &&
-                      // Price Range Filter
-                      (filters.minPrice === '' || t.amount >= Number(filters.minPrice)) &&
-                      (filters.maxPrice === '' || t.amount <= Number(filters.maxPrice)) &&
-                      // Location Filter
-                      (filters.location === '' || (t.location || '').toLowerCase().includes(filters.location.toLowerCase()))
-                    )
-                  );
-
-                  if (filteredListings.length === 0) {
-                    return (
-                      <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200">
-                        <p className="text-slate-500 text-sm font-medium">No listings found matching your criteria.</p>
-                        {(filters.category !== 'All' || filters.minPrice || filters.maxPrice || filters.location) && (
-                          <button 
-                            onClick={() => setFilters({category: 'All', minPrice: '', maxPrice: '', location: ''})}
-                            className="mt-2 text-emerald-600 font-bold text-xs hover:underline"
-                          >
-                            Clear Filters
-                          </button>
-                        )}
-                      </div>
-                    );
-                  }
-
-                  return filteredListings.map(t => (
-                    <div key={t.id} onClick={() => handleClaim(t.id)} className="bg-white p-0 rounded-2xl border border-slate-100 shadow-sm hover:border-emerald-500 transition-all group overflow-hidden cursor-pointer relative">
-                      <div className="p-5 flex justify-between items-start">
-                        <div className="flex-1 min-w-0 pr-4">
-                          <div className="flex flex-wrap items-center gap-2 mb-2">
-                            <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-1 rounded-md uppercase tracking-wider">
-                              {t.category || 'Produce'}
-                            </span>
-                            {t.quantity && t.quantity > 0 && (
-                              <span className="flex items-center gap-1 text-[10px] text-slate-500 font-bold bg-slate-50 px-2 py-1 rounded-md">
-                                <Scale className="w-3 h-3" /> {t.quantity}kg
-                              </span>
-                            )}
-                            {t.location && (
-                              <span className="flex items-center gap-1 text-[10px] text-slate-500 font-bold bg-slate-50 px-2 py-1 rounded-md">
-                                <MapPin className="w-3 h-3" /> {t.location}
-                              </span>
-                            )}
-                          </div>
-                          <h3 className="font-bold text-slate-800 text-lg leading-tight mb-1">{t.title}</h3>
-                          <p className="text-xs text-slate-500 line-clamp-1">{t.description || "No description"}</p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="font-mono font-bold text-emerald-700 text-xl tracking-tight">KES {t.amount.toLocaleString()}</div>
-                          <div className="text-[10px] text-slate-400 mt-1 font-medium text-right">
-                            {t.quantity ? `~ ${(t.amount/t.quantity).toFixed(0)}/kg` : 'Flat Rate'}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Footer Action Strip */}
-                      <div className={`px-5 py-3 flex justify-between items-center ${
-                        (role === 'vendor' && t.farmer_id) ? 'bg-emerald-50' :
-                        (role === 'farmer' && t.vendor_id) ? 'bg-amber-50' :
-                        'bg-slate-50'
-                      }`}>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${t.farmer_id ? 'bg-emerald-500' : 'bg-amber-500'}`}></div>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                            {t.farmer_id ? 'Farmer Selling' : 'Vendor Buying'}
-                          </span>
-                        </div>
-                        <span className={`text-xs font-bold flex items-center gap-1 transition-colors ${
-                           (role === 'vendor' && t.farmer_id) ? 'text-emerald-700 group-hover:translate-x-1' :
-                           (role === 'farmer' && t.vendor_id) ? 'text-amber-700 group-hover:translate-x-1' :
-                           'text-slate-400'
-                        }`}>
-                          {(role === 'vendor' && t.farmer_id) ? 'Make Offer' : (role === 'farmer' && t.vendor_id) ? 'Fulfill Request' : 'View Details'} 
-                          <ChevronRight className="w-4 h-4" />
+              
+              <div className="relative w-full overflow-hidden" style={{ maskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)', WebkitMaskImage: 'linear-gradient(to right, transparent, black 5%, black 95%, transparent)' }}>
+                <div className="flex gap-3 animate-ticker w-max">
+                  {[...marketTrends, ...marketTrends].map((item, i) => (
+                    <div key={i} className="min-w-[140px] p-3 rounded-xl bg-slate-50 border border-slate-200 flex flex-col hover:border-emerald-300 transition-colors cursor-default group">
+                      <span className="text-xs font-medium text-slate-600 mb-1 truncate group-hover:text-emerald-700 transition-colors">{item.name}</span>
+                      <div className="flex items-end justify-between mt-auto">
+                        <span className="text-sm font-bold text-slate-800 font-mono">KES {item.price.toLocaleString()}</span>
+                        <span className={`text-[10px] font-bold flex items-center ${item.up ? 'text-emerald-600' : 'text-red-500'}`}>
+                          {item.up ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                          {item.change}%
                         </span>
                       </div>
                     </div>
-                  ));
-                })()}
+                  ))}
+                </div>
               </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+              {['All', 'Vegetables', 'Fruits', 'Grains', 'Livestock'].map(cat => (
+                <button 
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`px-4 py-2 rounded-full text-xs font-bold whitespace-nowrap transition ${activeCategory === cat ? 'bg-emerald-600 text-white shadow-emerald-200 shadow-md' : 'bg-white text-slate-500 border border-slate-200'}`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {transactions
+                .filter(t => t.status === 'listed')
+                .filter(t => activeCategory === 'All' || t.category === activeCategory)
+                .map(t => {
+                  const isRequest = !t.farmer_id && t.vendor_id;
+                  const isListing = !t.vendor_id && t.farmer_id;
+                  
+                  return (
+                    <div key={t.id} onClick={() => setSelectedTxId(t.id)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-emerald-500 transition cursor-pointer group flex flex-col h-full">
+                      <div className={`h-24 rounded-lg mb-3 flex items-center justify-center transition relative overflow-hidden ${isRequest ? 'bg-amber-50 group-hover:bg-amber-100' : 'bg-emerald-50 group-hover:bg-emerald-100'}`}>
+                        {isRequest ? <Megaphone className="w-8 h-8 text-amber-400 group-hover:text-amber-500" /> : <ShoppingBag className="w-8 h-8 text-emerald-400 group-hover:text-emerald-500" />}
+                        <div className={`absolute top-2 right-2 text-[9px] font-bold px-1.5 py-0.5 rounded ${isRequest ? 'bg-amber-200 text-amber-800' : 'bg-emerald-200 text-emerald-800'}`}>
+                          {isRequest ? 'WANTED' : 'FOR SALE'}
+                        </div>
+                      </div>
+                      <div className="mb-1">
+                        <span className="text-[9px] uppercase font-bold text-slate-400">{t.category || 'General'}</span>
+                        <h4 className="font-bold text-slate-800 text-sm truncate">{t.title}</h4>
+                      </div>
+                      <p className="text-emerald-700 font-mono font-bold text-sm mt-1">KES {t.amount}</p>
+                      
+                      <div className="mt-auto pt-3">
+                        {role === 'vendor' && isListing && (
+                          <button onClick={(e) => { e.stopPropagation(); handleMakeOffer(t.id); }} className="w-full bg-slate-900 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-600 transition">
+                            Make Offer
+                          </button>
+                        )}
+                        {role === 'vendor' && isRequest && t.vendor_id === session.user.id && (
+                          <div className="w-full text-center text-[10px] text-amber-700 font-bold bg-amber-50 py-1 rounded">Your Request</div>
+                        )}
+                        {role === 'farmer' && isRequest && (
+                          <button onClick={(e) => { e.stopPropagation(); handleFulfillRequest(t.id); }} className="w-full bg-emerald-600 text-white text-xs py-2 rounded-lg font-bold hover:bg-emerald-700 transition shadow-lg shadow-emerald-200">
+                            Fulfill Order
+                          </button>
+                        )}
+                        {role === 'farmer' && isListing && t.farmer_id === session.user.id && (
+                          <div className="w-full text-center text-[10px] text-emerald-600 font-bold bg-emerald-50 py-1 rounded">Your Listing</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+              })}
+              
+              {transactions.filter(t => t.status === 'listed').filter(t => activeCategory === 'All' || t.category === activeCategory).length === 0 && (
+                <div className="col-span-2 text-center py-10 text-slate-400 text-sm flex flex-col items-center gap-3">
+                  <p>No listings available in this category.</p>
+                  <button onClick={() => setSetupRequired(true)} className="text-xs text-emerald-600 underline">Don't see items? Check Database Rules</button>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Create View */}
-        {activeTab === 'create' && (
+        {view === 'create' && (
           <div className="animate-in slide-in-from-bottom-5 duration-300">
-            <div className="bg-white p-6 rounded-3xl shadow-lg shadow-slate-200/50 border border-slate-100">
-              <h2 className="text-xl font-extrabold text-slate-800 mb-6 flex items-center gap-3 pb-4 border-b border-slate-50">
-                <div className="bg-emerald-100 p-2 rounded-xl text-emerald-700">
-                  <Plus className="w-6 h-6" />
-                </div>
-                {role === 'farmer' ? 'List Produce (Sell)' : 'Create Request (Buy)'}
-              </h2>
-              <form onSubmit={handleCreate} className="space-y-5">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+              <h2 className="text-xl font-bold text-slate-800 mb-6">{role === 'farmer' ? 'List Produce (Sell)' : 'Create Request (Buy)'}</h2>
+              <form onSubmit={handleCreateTransaction} className="space-y-5">
                 <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Category</label>
-                  <div className="relative">
-                    <select 
-                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition appearance-none font-medium text-slate-700"
-                      value={createForm.category}
-                      onChange={e => setCreateForm({...createForm, category: e.target.value})}
-                    >
-                      {['Maize', 'Beans', 'Potatoes', 'Tomatoes', 'Onions', 'Rice', 'Bananas', 'Other'].map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                    <ChevronRight className="w-5 h-5 text-slate-400 absolute right-4 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Title</label>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Title / Item Name</label>
                   <input 
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium placeholder:font-normal"
-                    placeholder="e.g., 5 Bags of Yellow Beans"
-                    value={createForm.title}
-                    onChange={e => setCreateForm({...createForm, title: e.target.value})}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                    placeholder="e.g., 500kg Yellow Corn"
+                    value={newTitle}
+                    onChange={e => setNewTitle(e.target.value)}
                     required
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Quantity (kg)</label>
-                    <input 
-                      type="number"
-                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono font-medium"
-                      placeholder="100"
-                      value={createForm.quantity}
-                      onChange={e => setCreateForm({...createForm, quantity: e.target.value})}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Total Amount (KES)</label>
-                    <input 
-                      type="number"
-                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono font-medium"
-                      placeholder="5000"
-                      value={createForm.amount}
-                      onChange={e => setCreateForm({...createForm, amount: e.target.value})}
-                      required
-                    />
-                  </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Category</label>
+                  <select 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={newCategory}
+                    onChange={e => setNewCategory(e.target.value)}
+                  >
+                    <option>Vegetables</option>
+                    <option>Fruits</option>
+                    <option>Grains</option>
+                    <option>Livestock</option>
+                    <option>Other</option>
+                  </select>
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Location</label>
-                  <div className="relative">
-                    <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-                    <input 
-                      className="w-full p-4 pl-12 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition font-medium placeholder:font-normal"
-                      placeholder="e.g. Nairobi, Nakuru, Eldoret"
-                      value={createForm.location}
-                      onChange={e => setCreateForm({...createForm, location: e.target.value})}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2 ml-1">Description</label>
-                  <textarea 
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none h-32 resize-none transition font-medium placeholder:font-normal"
-                    placeholder="Describe quality, packaging, specific pickup details..."
-                    value={createForm.description}
-                    onChange={e => setCreateForm({...createForm, description: e.target.value})}
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Amount (KES)</label>
+                  <input 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono"
+                    type="number"
+                    placeholder="50000"
+                    value={newAmount}
+                    onChange={e => setNewAmount(e.target.value)}
+                    required
                   />
                 </div>
 
-                <div className="pt-2">
-                  <div className="bg-emerald-50 text-emerald-800 p-4 rounded-xl text-xs mb-4 flex items-start gap-3 border border-emerald-100">
-                    <TrendingUp className="w-5 h-5 shrink-0 mt-0.5 text-emerald-600" />
-                    <div>
-                      <p className="font-bold mb-1">Market Insight</p>
-                      <p className="opacity-90">Calculated Price: <strong>KES {(Number(createForm.amount) / Number(createForm.quantity || 1)).toFixed(2)} / kg</strong>. This will affect rolling average trends.</p>
-                    </div>
-                  </div>
-                  <button 
-                    disabled={creating}
-                    className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-emerald-700/30 active:scale-[0.98] transition flex justify-center items-center gap-2"
-                  >
-                    {creating ? <Loader2 className="animate-spin w-5 h-5" /> : (
-                      <>
-                        <Plus className="w-5 h-5" />
-                        {role === 'farmer' ? "List on Market" : "Post Request"}
-                      </>
-                    )}
-                  </button>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Description / Terms</label>
+                  <textarea 
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none h-24 resize-none"
+                    placeholder="Delivery details, quality specifications..."
+                    value={newDesc}
+                    onChange={e => setNewDesc(e.target.value)}
+                  />
                 </div>
+
+                <button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 rounded-xl font-bold shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition">
+                  {role === 'farmer' ? 'Post Listing to Market' : 'Post Request to Market'}
+                </button>
+                
+                <p className="text-xs text-slate-400 text-center">
+                  This will appear in the Marketplace for {role === 'farmer' ? 'Vendors' : 'Farmers'} to see.
+                </p>
               </form>
             </div>
           </div>
         )}
 
-        {activeTab === 'wallet' && (
-          <WalletView 
-            wallet={wallet} 
-            transactions={walletTransactions}
-            onTopUp={handleTopUp}
-            onWithdraw={handleWithdraw}
-          />
-        )}
+        {view === 'wallet' && (
+          <div className="space-y-4 animate-in fade-in">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 text-center">
+              <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Wallet className="w-8 h-8 text-emerald-600" />
+              </div>
+              <h2 className="text-3xl font-mono font-bold text-slate-800">KES {wallet?.balance.toLocaleString() ?? '...'}</h2>
+              <p className="text-slate-400 text-sm mb-6">Available Balance</p>
+              <button 
+                onClick={simulateMpesa}
+                className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition"
+              >
+                Simulate Bank Deposit (+5,000)
+              </button>
+            </div>
 
-        {activeTab === 'profile' && (
-          <ProfileView 
-            profile={profile}
-            userRole={role}
-            email={session?.user?.email}
-            onUpdateProfile={handleUpdateProfile}
-          />
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+              <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <History className="w-4 h-4 text-slate-400" />
+                Transaction History
+              </h3>
+              <div className="space-y-3">
+                {/* Mock History Logic based on transactions */}
+                {transactions
+                  .filter(t => t.vendor_id === session.user.id && (t.status === 'in_escrow' || t.status === 'completed'))
+                  .map(t => (
+                    <div key={'w-'+t.id} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-red-50 flex items-center justify-center">
+                          <ArrowUp className="w-4 h-4 text-red-500" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-700">Escrow Deposit</p>
+                          <p className="text-xs text-slate-400">{t.title}</p>
+                        </div>
+                      </div>
+                      <span className="font-mono font-bold text-red-600">- {t.amount.toLocaleString()}</span>
+                    </div>
+                  ))}
+                 {transactions
+                  .filter(t => t.farmer_id === session.user.id && t.status === 'completed')
+                  .map(t => (
+                    <div key={'w-'+t.id} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center">
+                          <ArrowDown className="w-4 h-4 text-emerald-500" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-700">Payment Received</p>
+                          <p className="text-xs text-slate-400">{t.title}</p>
+                        </div>
+                      </div>
+                      <span className="font-mono font-bold text-emerald-600">+ {t.amount.toLocaleString()}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-emerald-50 flex items-center justify-center">
+                          <ArrowDown className="w-4 h-4 text-emerald-500" />
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-700">Deposit</p>
+                          <p className="text-xs text-slate-400">M-Pesa Top Up</p>
+                        </div>
+                      </div>
+                      <span className="font-mono font-bold text-emerald-600">+ {wallet?.balance > 0 ? '5,000' : '0'}</span>
+                    </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 
-      {/* Bottom Nav */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200/60 p-2 pb-6 max-w-md mx-auto flex justify-around items-center z-40 rounded-t-3xl shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)]">
-        <button onClick={() => setActiveTab('dashboard')} className={`p-3 rounded-2xl transition-all duration-300 flex flex-col items-center gap-1 ${activeTab === 'dashboard' ? 'text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}>
-          <Home className={`w-6 h-6 transition-transform ${activeTab === 'dashboard' ? '-translate-y-1' : ''}`} strokeWidth={activeTab === 'dashboard' ? 2.5 : 2} /> 
-          <span className={`text-[10px] font-bold transition-opacity ${activeTab === 'dashboard' ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>Home</span>
+      {selectedTransaction && (
+        <TransactionDetail 
+          transaction={selectedTransaction} 
+          onClose={() => setSelectedTxId(null)} 
+        />
+      )}
+
+      {/* Tour Overlay */}
+      {tourStepIndex >= 0 && (
+        <Tour 
+          steps={tourSteps} 
+          currentStep={tourStepIndex}
+          onNext={() => {
+            const nextIndex = tourStepIndex + 1;
+            if (nextIndex < tourSteps.length) {
+              // Automatically switch view if needed
+              const nextStep = tourSteps[nextIndex];
+              if (nextStep.view && nextStep.view !== view) {
+                setView(nextStep.view);
+              }
+              setTourStepIndex(nextIndex);
+            } else {
+              setTourStepIndex(-1); // Finish
+            }
+          }}
+          onClose={() => setTourStepIndex(-1)} 
+        />
+      )}
+
+      {/* Navigation */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-slate-200 p-2 pb-6 max-w-md mx-auto flex justify-around items-center z-40">
+        <button id="nav-home" onClick={() => setView('dashboard')} className={`p-3 rounded-2xl transition duration-300 flex flex-col items-center gap-1 ${view === 'dashboard' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-400 hover:bg-slate-50'}`}>
+          <List className="w-6 h-6" />
+          <span className="text-[10px] font-bold">Home</span>
         </button>
-        <button onClick={() => setActiveTab('market')} className={`p-3 rounded-2xl transition-all duration-300 flex flex-col items-center gap-1 ${activeTab === 'market' ? 'text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}>
-          <Store className={`w-6 h-6 transition-transform ${activeTab === 'market' ? '-translate-y-1' : ''}`} strokeWidth={activeTab === 'market' ? 2.5 : 2} /> 
-          <span className={`text-[10px] font-bold transition-opacity ${activeTab === 'market' ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>Market</span>
+        <button id="nav-market" onClick={() => setView('market')} className={`p-3 rounded-2xl transition duration-300 flex flex-col items-center gap-1 ${view === 'market' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-400 hover:bg-slate-50'}`}>
+          <Store className="w-6 h-6" />
+          <span className="text-[10px] font-bold">Market</span>
         </button>
-        <button onClick={() => setActiveTab('create')} className="p-4 bg-slate-900 text-white rounded-full shadow-xl shadow-slate-900/30 transform -translate-y-6 hover:scale-105 transition active:scale-95 border-4 border-slate-50">
+        <button id="nav-create" onClick={() => setView('create')} className="p-4 bg-emerald-600 text-white rounded-full shadow-lg shadow-emerald-600/30 transform -translate-y-6 hover:scale-105 transition active:scale-95">
           <Plus className="w-7 h-7" />
         </button>
-        <button onClick={() => setActiveTab('wallet')} className={`p-3 rounded-2xl transition-all duration-300 flex flex-col items-center gap-1 ${activeTab === 'wallet' ? 'text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}>
-          <Wallet className={`w-6 h-6 transition-transform ${activeTab === 'wallet' ? '-translate-y-1' : ''}`} strokeWidth={activeTab === 'wallet' ? 2.5 : 2} /> 
-          <span className={`text-[10px] font-bold transition-opacity ${activeTab === 'wallet' ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>Wallet</span>
+        <button id="nav-wallet" onClick={() => setView('wallet')} className={`p-3 rounded-2xl transition duration-300 flex flex-col items-center gap-1 ${view === 'wallet' ? 'bg-emerald-100 text-emerald-800' : 'text-slate-400 hover:bg-slate-50'}`}>
+          <Wallet className="w-6 h-6" />
+          <span className="text-[10px] font-bold">Wallet</span>
         </button>
-        <button onClick={() => setActiveTab('profile')} className={`p-3 rounded-2xl transition-all duration-300 flex flex-col items-center gap-1 ${activeTab === 'profile' ? 'text-emerald-700' : 'text-slate-400 hover:text-slate-600'}`}>
-          <User className={`w-6 h-6 transition-transform ${activeTab === 'profile' ? '-translate-y-1' : ''}`} strokeWidth={activeTab === 'profile' ? 2.5 : 2} /> 
-          <span className={`text-[10px] font-bold transition-opacity ${activeTab === 'profile' ? 'opacity-100' : 'opacity-0 h-0 overflow-hidden'}`}>Profile</span>
-        </button>
-      </div>
-
-      {/* Transaction Details Modal */}
-      {activeTransactionId && (
-        <TransactionDetails 
-          transaction={transactions.find(t => t.id === activeTransactionId)!}
-          role={role}
-          userId={session.user.id}
-          userEmail={session.user.email}
-          onClose={() => setActiveTransactionId(null)}
-          onUpdate={handleUpdateStatus}
-        />
-      )}
-
-      {/* Onboarding Tour */}
-      {!session?.user?.user_metadata?.has_seen_tour && (
-        <OnboardingTour onFinish={() => setSession(s => s && {...s, user: {...s.user, user_metadata: {...s.user.user_metadata, has_seen_tour: true}}})} />
-      )}
-      {showTour && <OnboardingTour onFinish={() => setShowTour(false)} />}
-    </div>
-  );
-};
-
-// Onboarding Tour Component with UI highlights
-const OnboardingTour = ({ onFinish }: { onFinish: () => void }) => {
-  const [step, setStep] = useState(0);
-
-  const steps: { id: string | null; title: string; body: string }[] = [
-    {
-      id: 'header',
-      title: 'Welcome to Mkulima Express',
-      body: 'This is your home for secure farmer–vendor trades with an escrow wallet.',
-    },
-    {
-      id: 'market',
-      title: 'Market: Discover Deals',
-      body: 'Here you will see listings from farmers and requests from vendors. This is where contracts usually start.',
-    },
-    {
-      id: 'create',
-      title: 'Create: Start a Contract',
-      body: 'Use this button to post a new listing (if you are a farmer) or a purchase request (if you are a vendor).',
-    },
-    {
-      id: 'wallet',
-      title: 'Wallet: Escrow Funds',
-      body: 'Your wallet holds money that can be locked into escrow for active contracts and released after delivery.',
-    },
-    {
-      id: 'dashboard',
-      title: 'Dashboard & Secure Chat',
-      body: 'Your active contracts live here. Open one to track the escrow timeline, chat privately with the other party, and manage disputes.',
-    },
-  ];
-
-  const current = steps[step];
-  const isLast = step === steps.length - 1;
-  const targetRect = useTourTargetRect(current.id);
-
-  const handleNext = () => {
-    if (isLast) {
-      setSeenTour();
-      onFinish();
-    } else {
-      setStep((s) => s + 1);
-    }
-  };
-
-  const handleSkip = () => {
-    setSeenTour();
-    onFinish();
-  };
-
-  // Simple padding around the highlight
-  const padding = 8;
-  const highlightStyle = targetRect
-    ? {
-        top: targetRect.top - padding,
-        left: targetRect.left - padding,
-        width: targetRect.width + padding * 2,
-        height: targetRect.height + padding * 2,
-      }
-    : null;
-
-  // Decide where to place tooltip: above or below target
-  const tooltipStyle = targetRect
-    ? {
-        top: Math.max(targetRect.bottom + 12, targetRect.top - 140) + window.scrollY,
-        left: Math.min(
-          Math.max(targetRect.left + targetRect.width / 2 - 160, 16),
-          window.innerWidth - 320
-        ),
-      }
-    : {
-        top: window.innerHeight / 2 - 120 + window.scrollY,
-        left: window.innerWidth / 2 - 160,
-      };
-
-  return (
-    <div className="fixed inset-0 z-[90] pointer-events-none">
-      {/* Dim background */}
-      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" />
-
-      {/* Highlight box */}
-      {highlightStyle && (
-        <div
-          className="absolute rounded-2xl ring-4 ring-emerald-400/70 bg-white/0 pointer-events-none transition-all duration-200"
-          style={highlightStyle}
-        />
-      )}
-
-      {/* Tooltip / content card */}
-      <div
-        className="absolute w-80 max-w-[90vw] bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 pointer-events-auto"
-        style={tooltipStyle}
-      >
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-emerald-600" />
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-              Escrow Tour
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={handleSkip}
-            className="text-slate-400 hover:text-slate-600"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <h2 className="text-sm font-bold text-slate-900 mb-1.5">{current.title}</h2>
-        <p className="text-xs text-slate-600 mb-4 leading-relaxed">{current.body}</p>
-        <div className="flex items-center justify-between mb-2">
-          <button
-            type="button"
-            onClick={handleSkip}
-            className="text-[11px] font-semibold text-slate-400 hover:text-slate-600"
-          >
-            Skip tour
-          </button>
-          <div className="flex gap-1">
-            {steps.map((_, i) => (
-              <div
-                key={i}
-                className={`h-1.5 w-4 rounded-full ${
-                  i <= step ? 'bg-emerald-500' : 'bg-slate-200'
-                }`}
-              />
-            ))}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={handleNext}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py
-              <div
-                key={i}
-                className={`h-1.5 w-4 rounded-full ${
-                  i <= step ? 'bg-emerald-500' : 'bg-slate-200'
-                }`}
-              />
-            ))}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={handleNext}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-2"
-        >
-          {isLast ? 'Got it, start using app' : 'Next'}
-          {!isLast && <ChevronRight className="w-3.5 h-3.5" />}
+        <button onClick={() => setSetupRequired(true)} className="p-3 rounded-2xl text-slate-400 hover:bg-slate-50 flex flex-col items-center gap-1">
+          <User className="w-6 h-6" />
+          <span className="text-[10px] font-bold">Profile</span>
         </button>
       </div>
     </div>
@@ -2193,7 +1513,4 @@ const OnboardingTour = ({ onFinish }: { onFinish: () => void }) => {
 };
 
 const root = createRoot(document.getElementById('root')!);
-
-
-
 root.render(<App />);
