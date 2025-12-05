@@ -9,7 +9,7 @@ import {
   Clock, MapPin, Truck, ShieldCheck, AlertCircle, Search,
   ChevronRight, MessageSquare, Bell, ArrowDown, ArrowUp, Lock,
   SlidersHorizontal, Filter, Edit2, Save, Camera, ArrowUpDown,
-  ScanLine, QrCode, Send
+  ScanLine, QrCode, Send, Mail
 } from 'lucide-react';
 
 // Initialize Supabase Client
@@ -412,7 +412,7 @@ const ProfileView = ({ profile, userRole, email, onUpdateProfile }: {
       await onUpdateProfile(formData);
       setIsEditing(false);
     } catch (err) {
-      alert("Failed to save profile.");
+      alert("Failed to save profile. Ensure the database table exists.");
     } finally {
       setSaving(false);
     }
@@ -459,6 +459,17 @@ const ProfileView = ({ profile, userRole, email, onUpdateProfile }: {
 
         {isEditing ? (
           <form onSubmit={handleSave} className="space-y-4">
+            <div>
+                <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Email (Read Only)</label>
+                <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <input 
+                        className="w-full p-3 pl-10 bg-slate-100 border border-slate-200 rounded-xl text-slate-500 cursor-not-allowed"
+                        value={email || ''}
+                        disabled
+                    />
+                </div>
+            </div>
             <div>
               <label className="text-xs font-bold text-slate-500 uppercase mb-1.5 block">Display Name</label>
               <input 
